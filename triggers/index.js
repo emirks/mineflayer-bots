@@ -5,6 +5,7 @@ const { executeActions } = require('../actions')
 const registry = {
   playerRadius: require('./playerRadius'),
   blockNearby:  require('./blockNearby'),
+  onSpawn:      require('./onSpawn'),
 }
 
 // Resolves a trigger config, builds the fire() callback that runs its action
