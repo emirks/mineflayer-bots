@@ -22,11 +22,20 @@ console.log(`[BOOT] Loading profile "${profileName}"`)
 const mineflayer = require('mineflayer')
 const { registerTrigger } = require('./triggers')
 const mc = require('./lib/mcdata')
+const { attachProtocolDebug, formatKickReason } = require('./lib/protocolDebug')
 
-const { bot: botConfig, viewer: viewerConfig, triggers } = profile
+const { bot: botConfig, viewer: viewerConfig, triggers, protocolDebug } = profile
 
 // ─── Bot ──────────────────────────────────────────────────────────────────────
 const bot = mineflayer.createBot(botConfig)
+
+const protocolDebugMerged = {
+  ...(protocolDebug || {}),
+  ...(process.env.MC_PROTOCOL_DEBUG === '1' || process.env.MC_PROTOCOL_DEBUG === 'true'
+    ? { enabled: true }
+    : {}),
+}
+attachProtocolDebug(bot, protocolDebugMerged)
 
 // Stubs for mindcraft-specific bot properties used inside lib/skills.js
 bot.output = ''
@@ -45,7 +54,7 @@ bot.on('error', (err) => {
 })
 
 bot.on('kicked', (reason) => {
-  console.warn('[KICKED]', reason)
+  console.warn('[KICKED]', formatKickReason(reason))
   process.exit(1)
 })
 
