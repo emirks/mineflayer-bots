@@ -30,7 +30,7 @@ const bot = mineflayer.createBot(botConfig)
 
 // Stubs for mindcraft-specific bot properties used inside lib/skills.js
 bot.output = ''
-bot.modes = { isOn: () => false, pause: () => {}, unpause: () => {} }
+bot.modes = { isOn: () => false, pause: () => { }, unpause: () => { } }
 
 // Load pathfinder + collectblock plugins and initialise minecraft-data lookups
 mc.init(bot)
