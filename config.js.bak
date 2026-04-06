@@ -1,14 +1,14 @@
 // ─── Bot connection ───────────────────────────────────────────────────────────
 const bot = {
-  host: 'mslc.mc-complex.com',
+  host: 'localhost',
   port: 25565,
 
   // For offline-mode servers use any name and set auth to 'offline'.
   // For online-mode (Microsoft) set auth to 'microsoft' — a device-code
   // login prompt will appear in the console on first run, then the token
   // is cached in profilesFolder so subsequent runs are silent.
-  username: 'gtamarkt1@outlook.com',
-  auth: 'microsoft',           // 'offline' | 'microsoft'
+  username: 'hi',
+  auth: 'offline',           // 'offline' | 'microsoft'
   profilesFolder: './auth-cache', // where Microsoft tokens are cached
 
   version: false, // false = auto-detect; or pin e.g. '1.21.1'
