@@ -31,7 +31,7 @@ async function startDebugScan(bot, options) {
       for (const e of entities) {
         if (e.username === bot.username) continue
         const label = e.username || e.name || e.type || 'unknown'
-        const dist  = bot.entity.position.distanceTo(e.position).toFixed(1)
+        const dist = bot.entity.position.distanceTo(e.position).toFixed(1)
         console.log(`[DEBUG]   ${label.padEnd(24)} ${dist}m`)
       }
     }

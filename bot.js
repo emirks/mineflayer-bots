@@ -1,7 +1,29 @@
+// ─── Profile selection ────────────────────────────────────────────────────────
+// Usage:  node bot.js <profile>
+// Example: node bot.js sentinel | node bot.js trader | node bot.js debug
+//
+// IMPORTANT: runtimeConfig must be set before any other require so that
+// lib/skills.js reads the correct blockPlaceDelay when it is first loaded.
+const runtimeConfig = require('./lib/runtimeConfig')
+
+const profileName = process.argv[2] || 'sentinel'
+let profile
+try {
+  profile = require(`./profiles/${profileName}`)
+} catch {
+  console.error(`[ERROR] Unknown profile "${profileName}". Available: sentinel, trader, debug`)
+  process.exit(1)
+}
+
+runtimeConfig.set(profile)
+console.log(`[BOOT] Loading profile "${profileName}"`)
+
+// ─── Remaining requires (skills.js is loaded transitively here) ───────────────
 const mineflayer = require('mineflayer')
-const { bot: botConfig, viewer: viewerConfig, triggers } = require('./config')
 const { registerTrigger } = require('./triggers')
 const mc = require('./lib/mcdata')
+
+const { bot: botConfig, viewer: viewerConfig, triggers } = profile
 
 // ─── Bot ──────────────────────────────────────────────────────────────────────
 const bot = mineflayer.createBot(botConfig)

@@ -1,13 +1,13 @@
 // ─── Action registry ──────────────────────────────────────────────────────────
 // Add new action types here by mapping a name to its handler module.
 const registry = {
-  breakBlock:     require('./breakBlock'),
+  breakBlock: require('./breakBlock'),
   breakAllBlocks: require('./breakAllBlocks'),
-  disconnect:     require('./disconnect'),
-  goToBlock:      require('./goToBlock'),
-  takeFromChest:  require('./takeFromChest'),
-  pickupItems:    require('./pickupItems'),
-  sendChat:       require('./sendChat'),
+  disconnect: require('./disconnect'),
+  goToBlock: require('./goToBlock'),
+  takeFromChest: require('./takeFromChest'),
+  pickupItems: require('./pickupItems'),
+  sendChat: require('./sendChat'),
   startDebugScan: require('./startDebugScan'),
 }
 
