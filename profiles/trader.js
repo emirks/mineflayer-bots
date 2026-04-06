@@ -29,14 +29,14 @@ module.exports = {
     {
       type: 'blockNearby',
       options: {
-        blockName:       'chest',
-        radius:          20,
+        blockName: 'chest',
+        radius: 20,
         checkIntervalMs: 1000,
       },
       actions: [
         { type: 'takeFromChest', options: { itemName: 'bone', num: -1 } },
-        { type: 'sendChat',      options: { message: '/sell all', delayAfterMs: 1000 } },
-        { type: 'pickupItems',   options: {} },
+        { type: 'sendChat', options: { message: '/sell all', delayAfterMs: 1000 } },
+        { type: 'pickupItems', options: {} },
       ],
     },
 
@@ -44,9 +44,9 @@ module.exports = {
     {
       type: 'playerRadius',
       options: {
-        printRadius:     30,
-        alertRadius:     10,
-        panicRadius:     5,
+        printRadius: 30,
+        alertRadius: 10,
+        panicRadius: 5,
         checkIntervalMs: 500,
         panicIntervalMs: 100,
       },
