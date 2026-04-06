@@ -14,6 +14,12 @@ const bot = {
   version: false, // false = auto-detect; or pin e.g. '1.21.1'
 }
 
+// ─── Skills ───────────────────────────────────────────────────────────────────
+// Fine-tuning for lib/skills.js behaviour.
+const skills = {
+  blockPlaceDelay: 0, // milliseconds to wait between block placements (0 = instant)
+}
+
 // ─── Viewer ───────────────────────────────────────────────────────────────────
 // Starts a local web server that renders the bot's world in a browser.
 // Open http://localhost:<port> after the bot spawns.
@@ -33,6 +39,7 @@ const viewer = {
 //
 // Available action types:
 //   breakBlock    — digs the nearest block of a given type
+//   breakAllBlocks — digs every occurrence of a block type within range
 //   disconnect    — disconnects the bot from the server
 //   goToBlock     — pathfinds to the nearest block of a given type
 //   takeFromChest — walks to the nearest chest and withdraws an item
@@ -42,9 +49,9 @@ const triggers = [
   // ── Example 1: player proximity escape ─────────────────────────────────────
   {
     type: 'playerRadius',
-    options: { printRadius: 50, alertRadius: 26, checkIntervalMs: 500 },
+    options: { printRadius: 50, alertRadius: 2, checkIntervalMs: 5000 },
     actions: [
-      { type: 'breakBlock', options: { blockName: 'crafting_table', searchRadius: 64 } },
+      { type: 'breakAllBlocks', options: { blockName: 'crafting_table', searchRadius: 64 } },
       { type: 'disconnect' },
     ],
   },
@@ -54,7 +61,7 @@ const triggers = [
     type: 'blockNearby',
     options: {
       blockName: 'chest',
-      radius: 20,           // scan radius in blocks
+      radius: 20,
       checkIntervalMs: 1000,
     },
     actions: [
@@ -69,4 +76,4 @@ const triggers = [
   },
 ]
 
-module.exports = { bot, viewer, triggers }
+module.exports = { bot, skills, viewer, triggers }

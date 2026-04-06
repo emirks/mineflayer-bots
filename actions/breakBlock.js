@@ -1,13 +1,12 @@
-// Finds the nearest block matching `blockName` within `searchRadius` and digs it.
-// bot.dig awaits the full break animation, so the action truly completes before
-// the next action in the stack starts.
+const world  = require('../lib/world')
+const skills = require('../lib/skills')
+
+// Find the nearest matching block via world, then dig it via skills.
+// skills.breakBlockAt handles the dig call and awaits the full break animation.
 async function breakBlock(bot, options) {
   const { blockName = 'crafting_table', searchRadius = 64 } = options
 
-  const block = bot.findBlock({
-    matching: (b) => b.name === blockName,
-    maxDistance: searchRadius,
-  })
+  const block = world.getNearestBlock(bot, blockName, searchRadius)
 
   if (!block) {
     console.log(`[ACTION] No "${blockName}" found within ${searchRadius} blocks — skipping.`)
@@ -16,13 +15,7 @@ async function breakBlock(bot, options) {
 
   const { x, y, z } = block.position
   console.log(`[ACTION] Breaking "${blockName}" at (${x}, ${y}, ${z})...`)
-
-  try {
-    await bot.dig(block)
-    console.log(`[ACTION] "${blockName}" broken.`)
-  } catch (err) {
-    console.warn(`[ACTION] Could not break "${blockName}" — ${err.message}`)
-  }
+  await skills.breakBlockAt(bot, x, y, z)
 }
 
 module.exports = breakBlock

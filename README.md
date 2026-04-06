@@ -2,82 +2,75 @@
 
 A configurable Minecraft bot system built on [mineflayer](https://github.com/PrismarineJS/mineflayer). Define **triggers** (conditions to watch) and **actions** (what to do when triggered) entirely through `config.js` — no code changes needed to change behavior.
 
+The skill layer (`lib/`) is adapted from [mindcraft](https://github.com/kolbytn/mindcraft)'s battle-tested implementation, stripped of all LLM/agent machinery to run as pure, standalone Mineflayer functions.
+
 ---
 
 ## Quick start
 
-This project is set up for **[pnpm](https://pnpm.io/)** (recommended). Install pnpm once if you need it: `npm install -g pnpm`.
-
 ```bash
-pnpm install
-# edit config.js to match your server
+pnpm install      # requires pnpm — install once with: npm i -g pnpm
+# edit config.js
 pnpm start
 ```
 
 ---
 
-## Install, clean reinstall, and switching from npm
+## Project structure
 
-**What to delete** (from the `mineflayer-bots` folder) to fully reset dependencies:
-
-| Remove | Why |
-|--------|-----|
-| `node_modules/` | All installed packages |
-| `pnpm-lock.yaml` | pnpm lockfile (regenerates on `pnpm install`) |
-| `package-lock.json` | Left over if you ever ran `npm install` — do not mix with pnpm |
-
-Then run:
-
-```bash
-pnpm install
 ```
-
-**Do not** run `npm install` in this folder if you use pnpm — it creates `package-lock.json` and can confuse which tool owns the tree. This repo’s `.gitignore` ignores `package-lock.json` on purpose.
-
-**pnpm 10+ and `canvas`:** pnpm blocks dependency install scripts by default. `package.json` includes `pnpm.onlyBuiltDependencies: ["canvas"]` so the native `canvas` addon (required by prismarine-viewer) can compile. If you still see `Cannot find module '../build/Release/canvas.node'`, do a **clean reinstall** (delete the three items above, then `pnpm install`). On Windows, if the build fails, install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with **Desktop development with C++**, then reinstall. Easiest workaround: set `viewer.enabled` to `false` in `config.js` if you do not need the browser viewer.
+mineflayer-bots/
+├── bot.js              # Entry point: create bot, load plugins, register triggers
+├── config.js           # All configuration lives here
+├── lib/                # Skill layer (adapted from mindcraft, see below)
+│   ├── mcdata.js       # minecraft-data lookups + plugin loader (init)
+│   ├── world.js        # Block/entity/inventory query helpers
+│   └── skills.js       # High-level async skills (movement, containers, combat…)
+├── triggers/
+│   ├── index.js        # Registry + fire() bridge
+│   ├── playerRadius.js # Fires when a player enters a radius
+│   └── blockNearby.js  # Fires when a block type enters a radius
+└── actions/
+    ├── index.js        # Sequential executor (awaits each step)
+    ├── breakBlock.js   # Dig nearest matching block
+    ├── disconnect.js   # Clean disconnect
+    ├── goToBlock.js    # Pathfind to nearest block of a type
+    ├── takeFromChest.js# Walk to chest, open it, withdraw item
+    └── pickupItems.js  # Collect nearby dropped items
+```
 
 ---
 
 ## Configuration (`config.js`)
 
-Everything lives in one file. Three top-level sections:
-
 ### `bot` — connection
 
-| Key | Default | Description |
-|---|---|---|
-| `host` | `'localhost'` | Server IP or hostname |
-| `port` | `25565` | Server port |
-| `username` | `'ProximityBot'` | In-game name |
-| `auth` | `'offline'` | `'offline'` for cracked/LAN servers, `'microsoft'` for online-mode |
-| `profilesFolder` | `'./auth-cache'` | Where Microsoft OAuth tokens are cached after first login |
-| `version` | `false` | Minecraft version to use (`false` = auto-detect) |
+| Key | Description |
+|---|---|
+| `host` / `port` | Server address |
+| `username` | In-game name (use account email for Microsoft auth) |
+| `auth` | `'offline'` (LAN/cracked) or `'microsoft'` (online-mode) |
+| `profilesFolder` | Where Microsoft tokens are cached after first login |
+| `version` | `false` = auto-detect, or pin e.g. `'1.21.1'` |
 
-**Microsoft auth:** set `auth: 'microsoft'`, run the bot, follow the device-code URL that appears in the console. After the first login the token is cached — subsequent runs connect silently.
+### `viewer` — in-browser 3D render
 
-### `viewer` — in-browser world render
-
-| Key | Default | Description |
-|---|---|---|
-| `enabled` | `false` | Set to `true` to start the viewer |
-| `port` | `3000` | Web server port |
-| `firstPerson` | `false` | `true` = see through the bot's eyes |
-
-When enabled, open `http://localhost:3000` in any browser after the bot spawns.
-
-**Why `canvas` is installed:** [prismarine-viewer](https://www.npmjs.com/package/prismarine-viewer) loads the native [`canvas`](https://www.npmjs.com/package/canvas) package server-side. It is not always installed transitively, so this repo lists **`canvas`** explicitly. See **Install, clean reinstall** above for pnpm + Windows build issues.
+| Key | Description |
+|---|---|
+| `enabled` | `true` to start the viewer |
+| `port` | Web server port (default `3000`) |
+| `firstPerson` | `true` = FPS camera through the bot's eyes |
 
 ### `triggers` — behavior
 
-An array of trigger objects. Each trigger watches for a condition and runs its **action stack** (in order, awaiting each step) the first time the condition is met.
+Each trigger fires its **action stack** once when its condition is first met. Actions run in order, fully awaited.
 
 ```js
 {
-  type: 'playerRadius',         // which trigger
-  options: { ... },             // trigger-specific settings
-  actions: [                    // stack — runs top to bottom
-    { type: 'breakBlock', options: { blockName: 'crafting_table', searchRadius: 64 } },
-    { type: 'disconnect' },
+  type: 'blockNearby',
+  options: { blockName: 'chest', radius: 20, checkIntervalMs: 1000 },
+  actions: [
+    { type: 'takeFromChest', options: { itemName: 'bone', num: -1 } },
   ],
 }
 ```
@@ -86,132 +79,115 @@ An array of trigger objects. Each trigger watches for a condition and runs its *
 
 ## Available triggers
 
-### `playerRadius`
-
-Polls all loaded player entities on a fixed interval.
-
-| Option | Default | Description |
+| Type | What it watches | Key options |
 |---|---|---|
-| `printRadius` | `50` | Log `[DIST]` lines for players closer than this |
-| `alertRadius` | `26` | Fire the action stack when any player crosses this |
-| `checkIntervalMs` | `500` | Scan frequency in milliseconds |
+| `playerRadius` | Distance to all loaded players | `printRadius`, `alertRadius`, `checkIntervalMs` |
+| `blockNearby` | Nearest block of a given type | `blockName`, `radius`, `checkIntervalMs` |
 
-The trigger fires **at most once** — it cancels its own interval the moment it trips so no further scans happen while actions are running.
-
----
+All triggers fire **at most once** and cancel their own interval the moment they trip.
 
 ## Available actions
 
-### `breakBlock`
-
-Finds the nearest block of a given type and digs it. Fully awaited before the next action starts.
-
-| Option | Default | Description |
+| Type | What it does | Key options |
 |---|---|---|
-| `blockName` | `'crafting_table'` | Minecraft block name (e.g. `'chest'`, `'furnace'`) |
-| `searchRadius` | `64` | How far to search in loaded chunks |
-
-### `disconnect`
-
-Sends a clean disconnect packet and exits. Always put this last in a stack.
-
----
-
-## Project structure
-
-```
-mineflayer-bots/
-├── bot.js              # Entry point — creates the bot, wires events, loads triggers
-├── config.js           # All configuration lives here
-├── triggers/
-│   ├── index.js        # Registry: maps type names → handlers, builds fire() bridge
-│   └── playerRadius.js # Implementation of the playerRadius trigger
-└── actions/
-    ├── index.js        # Sequential executor — awaits each action in the stack
-    ├── breakBlock.js   # Break nearest matching block
-    └── disconnect.js   # Disconnect from server
-```
+| `breakBlock` | Dig nearest matching block | `blockName`, `searchRadius` |
+| `disconnect` | Clean disconnect | — |
+| `goToBlock` | Pathfind to nearest block | `blockName`, `minDistance`, `searchRadius` |
+| `takeFromChest` | Walk to chest, open, withdraw item | `itemName`, `num` (`-1` = all) |
+| `pickupItems` | Collect dropped items nearby | — |
 
 ---
 
-## Adding a new action
+## The skill layer — adapted from mindcraft
 
-1. Create `actions/yourAction.js`:
+`lib/skills.js`, `lib/world.js`, and `lib/mcdata.js` are adapted from the [mindcraft](https://github.com/kolbytn/mindcraft) project's `src/agent/library/` and `src/utils/` directories.
+
+**What was changed (minimal):**
+
+| File | Change |
+|---|---|
+| All three | ESM `import/export` → CJS `require/module.exports` |
+| `mcdata.js` | Removed `initBot` (bot is created in `bot.js`); replaced with `init(bot)` which loads plugins and initialises `minecraft-data` |
+| `skills.js` | `settings.block_place_delay` → read from `config.js` (`skills.blockPlaceDelay`); `log()` now also prints to console |
+| `bot.js` | Added `bot.output = ''` and `bot.modes = { isOn: () => false, … }` stubs so skills work without the mindcraft agent |
+
+**What was not changed:** all skill logic — pathfinding, container interaction, item collection, combat, crafting — is untouched from mindcraft.
+
+To use any skill directly in a new action:
 
 ```js
-async function yourAction(bot, options) {
-  const { someOption = 'default' } = options
-  // do something with bot...
+const skills = require('../lib/skills')
+
+async function myAction(bot, options) {
+  await skills.goToNearestBlock(bot, 'furnace')
+  await skills.takeFromChest(bot, 'iron_ingot')
 }
-module.exports = yourAction
-```
-
-2. Register it in `actions/index.js`:
-
-```js
-const registry = {
-  breakBlock: require('./breakBlock'),
-  disconnect: require('./disconnect'),
-  yourAction: require('./yourAction'), // ← add this
-}
-```
-
-3. Use it in `config.js`:
-
-```js
-actions: [
-  { type: 'yourAction', options: { someOption: 'value' } },
-]
+module.exports = myAction
 ```
 
 ---
 
-## Adding a new trigger
+## Adding things
 
-1. Create `triggers/yourTrigger.js`:
+**New action:** create `actions/foo.js` exporting `async function(bot, options)`, register in `actions/index.js`, use in `config.js`. Reach for `lib/skills`, `lib/world`, and `lib/mcdata` for anything Minecraft-related — movement, containers, inventory, block lookups — before writing logic from scratch.
 
 ```js
-// A trigger receives the bot, its options, and fire() — a function that
-// executes the action stack. Call fire() when your condition is met.
+const skills = require('../lib/skills')
+const world  = require('../lib/world')
+const mc     = require('../lib/mcdata')
+
+async function myAction(bot, options) {
+  const chest = world.getNearestBlock(bot, 'chest', 32)   // world query
+  if (!chest) return
+  await skills.goToPosition(bot, chest.position.x, chest.position.y, chest.position.z)
+  await skills.takeFromChest(bot, options.itemName ?? 'bone')
+}
+module.exports = myAction
+```
+
+**New trigger:** create `triggers/foo.js` exporting `function(bot, options, fire)` (call `fire()` when condition met), register in `triggers/index.js`, use in `config.js`. Use `lib/world` to query the game state (e.g. `world.getNearestBlock`, `world.getInventoryCounts`) and `lib/mcdata` for ID/name lookups inside the condition check.
+
+```js
+const world = require('../lib/world')
+
 function register(bot, options, fire) {
-  const { threshold = 10 } = options
-  // set up whatever monitoring you need (event listener, interval, etc.)
-  bot.on('health', () => {
-    if (bot.health < threshold) {
-      fire({ health: bot.health })
+  const { itemName = 'bone', minCount = 10, checkIntervalMs = 1000 } = options
+  let triggered = false
+  const interval = setInterval(() => {
+    if (triggered || !bot.entity) return
+    const counts = world.getInventoryCounts(bot)    // world query
+    if ((counts[itemName] ?? 0) >= minCount) {
+      triggered = true
+      clearInterval(interval)
+      fire({ itemName, count: counts[itemName] })
     }
-  })
+  }, checkIntervalMs)
 }
 module.exports = register
-```
-
-2. Register it in `triggers/index.js`:
-
-```js
-const registry = {
-  playerRadius: require('./playerRadius'),
-  yourTrigger:  require('./yourTrigger'), // ← add this
-}
-```
-
-3. Use it in `config.js`:
-
-```js
-triggers: [
-  {
-    type: 'yourTrigger',
-    options: { threshold: 5 },
-    actions: [{ type: 'disconnect' }],
-  },
-]
 ```
 
 ---
 
 ## Dependencies
 
-| Package | Version | Purpose |
-|---|---|---|
-| `mineflayer` | `^4.37.0` | Core bot API |
-| `prismarine-viewer` | `^1.33.0` | In-browser world renderer |
-| `canvas` | `^3.x` | Required by prismarine-viewer at runtime (native addon; not auto-installed by the viewer package) |
+| Package | Purpose |
+|---|---|
+| `mineflayer` | Core bot API |
+| `mineflayer-pathfinder` | Pathfinding (required by movement skills) |
+| `mineflayer-collectblock` | Block collection plugin |
+| `minecraft-data` | Block/item ID lookups |
+| `prismarine-item` / `vec3` | Item types and 3D vectors |
+| `prismarine-viewer` | In-browser world renderer |
+| `canvas` | Native addon required by prismarine-viewer |
+
+---
+
+## Install notes
+
+Use **pnpm** only — do not mix with `npm install`.
+
+| To reset | Delete |
+|---|---|
+| Full reinstall | `node_modules/` + `pnpm-lock.yaml` + `package-lock.json`, then `pnpm install` |
+
+`pnpm.onlyBuiltDependencies: ["canvas"]` is set in `package.json` so pnpm allows the native canvas build. On Windows, if canvas fails to build, install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with **Desktop development with C++**. Or set `viewer.enabled: false` to skip the viewer entirely.

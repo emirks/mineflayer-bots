@@ -1,13 +1,13 @@
+const world = require('../lib/world')
+
 // Trigger: playerRadius
 //
-// Scans all loaded player entities on a fixed interval.
+// Scans all loaded player entities on a fixed interval using world.getNearbyPlayers.
 // Two independent radii:
-//   printRadius — log the player's distance on every tick (informational)
+//   printRadius — log every player closer than this on every tick (informational)
 //   alertRadius — fire the action stack the first time any player crosses this
 //
-// The trigger fires at most once per registration (guarded by `triggered`).
-// It cancels its own interval as soon as the action stack is kicked off so
-// no further scans run while actions are executing.
+// Fires at most once; cancels its own interval the moment it trips.
 
 function register(bot, options, fire) {
   const {
@@ -21,28 +21,33 @@ function register(bot, options, fire) {
   const interval = setInterval(() => {
     if (!bot.entity) return
 
-    for (const entity of Object.values(bot.entities)) {
-      if (entity.type !== 'player') continue
-      if (!entity.username || entity.username === bot.username) continue
-
+    // ── Distance logging ─────────────────────────────────────────────────────
+    // getNearbyPlayers returns entities sorted nearest-first, self excluded.
+    const visible = world.getNearbyPlayers(bot, printRadius)
+    for (const entity of visible) {
       const distance = bot.entity.position.distanceTo(entity.position)
+      console.log(`[DIST]    ${entity.username.padEnd(16)} → ${distance.toFixed(2)} blocks`)
+    }
 
-      // ── Distance logging ────────────────────────────────────────────────
-      if (distance <= printRadius) {
-        console.log(`[DIST]    ${entity.username.padEnd(16)} → ${distance.toFixed(2)} blocks`)
-      }
+    // ── Alert check ──────────────────────────────────────────────────────────
+    if (!triggered) {
+      const closest = world.getNearestEntityWhere(
+        bot,
+        e => e.type === 'player' && e.username !== bot.username,
+        alertRadius,
+      )
 
-      // ── Alert check ─────────────────────────────────────────────────────
-      if (!triggered && distance <= alertRadius) {
+      if (closest) {
         triggered = true
         clearInterval(interval)
 
+        const distance = bot.entity.position.distanceTo(closest.position)
         console.log(
-          `\n[⚠ ALERT] ${entity.username} crossed the ${alertRadius}-block alert radius! ` +
+          `\n[⚠ ALERT] ${closest.username} crossed the ${alertRadius}-block alert radius! ` +
           `Distance: ${distance.toFixed(2)} blocks`
         )
 
-        fire({ username: entity.username, distance })
+        fire({ username: closest.username, distance })
       }
     }
   }, checkIntervalMs)

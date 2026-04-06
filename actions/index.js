@@ -2,6 +2,7 @@
 // Add new action types here by mapping a name to its handler module.
 const registry = {
   breakBlock:    require('./breakBlock'),
+  breakAllBlocks: require('./breakAllBlocks'),
   disconnect:    require('./disconnect'),
   goToBlock:     require('./goToBlock'),
   takeFromChest: require('./takeFromChest'),
@@ -21,7 +22,11 @@ async function executeActions(bot, actionConfigs) {
     }
 
     console.log(`[ACTION] → ${actionConfig.type}`)
-    await handler(bot, actionConfig.options || {})
+    try {
+      await handler(bot, actionConfig.options || {})
+    } catch (err) {
+      console.warn(`[ACTION] "${actionConfig.type}" failed — ${err.message} — continuing.`)
+    }
   }
 }
 
