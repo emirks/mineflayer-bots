@@ -17,14 +17,14 @@ const world = require('../lib/world')
 
 function register(bot, options, fire) {
   const {
-    printRadius    = 50,
-    alertRadius    = 20,
-    panicRadius    = 5,
+    printRadius = 50,
+    alertRadius = 20,
+    panicRadius = 5,
     checkIntervalMs = 500,
     panicIntervalMs = 100,
   } = options
 
-  let alerted  = false
+  let alerted = false
   let panicked = false
 
   // ── Slow interval: distance logging + alert check ──────────────────────────
