@@ -49,7 +49,13 @@ const triggers = [
   // ── Example 1: player proximity escape ─────────────────────────────────────
   {
     type: 'playerRadius',
-    options: { printRadius: 50, alertRadius: 2, checkIntervalMs: 5000 },
+    options: {
+      printRadius: 50,   // log [DIST] for players within this
+      alertRadius: 7,   // fire actions + arm panic watch
+      panicRadius: 3,   // emergency bot.quit() regardless of running actions
+      checkIntervalMs: 500,  // slow scan (print + alert)
+      panicIntervalMs: 100,  // fast scan used only after alert fires
+    },
     actions: [
       { type: 'breakAllBlocks', options: { blockName: 'crafting_table', searchRadius: 64 } },
       { type: 'disconnect' },
