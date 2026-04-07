@@ -4,8 +4,8 @@ const { executeActions } = require('../actions')
 // Add new trigger types here by mapping a name to its handler module.
 const registry = {
   playerRadius: require('./playerRadius'),
-  blockNearby:  require('./blockNearby'),
-  onSpawn:      require('./onSpawn'),
+  blockNearby: require('./blockNearby'),
+  onSpawn: require('./onSpawn'),
 }
 
 // Resolves a trigger config, builds the fire() callback that runs its action

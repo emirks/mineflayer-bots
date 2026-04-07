@@ -48,14 +48,19 @@ function register(bot, options, fire) {
         alerted = true
         clearInterval(slowInterval)
 
+        bot._alertTime = Date.now()
         const distance = bot.entity.position.distanceTo(closest.position)
         console.log(
-          `\n[⚠ ALERT] ${closest.username} entered ${alertRadius}-block radius! ` +
-          `Distance: ${distance.toFixed(2)} blocks — starting actions + panic watch`
+          `\n[TRIGGER] ALERT — ${closest.username} within ${alertRadius} blocks ` +
+          `(${distance.toFixed(2)} m) — running action stack + arming panic watch`
         )
 
-        // Kick off action stack (async, non-blocking)
-        fire({ username: closest.username, distance })
+        // Kick off action stack (async, non-blocking).
+        // Chain .then() here — not in any action — because this trigger owns the timer.
+        fire({ username: closest.username, distance }).then(() => {
+          const elapsed = ((Date.now() - bot._alertTime) / 1000).toFixed(2)
+          console.log(`[TRIGGER] Action chain finished — ${elapsed}s since alert.`)
+        })
 
         // Immediately arm the fast panic watch
         startPanicWatch()
@@ -79,9 +84,10 @@ function register(bot, options, fire) {
         clearInterval(fastInterval)
 
         const distance = bot.entity.position.distanceTo(closest.position)
+        const elapsed = bot._alertTime ? ((Date.now() - bot._alertTime) / 1000).toFixed(2) : '?'
         console.log(
-          `\n[🚨 PANIC] ${closest.username} within ${panicRadius} blocks ` +
-          `(${distance.toFixed(2)}) — emergency disconnect!`
+          `\n[TRIGGER] PANIC — ${closest.username} within ${panicRadius} blocks ` +
+          `(${distance.toFixed(2)} m) — emergency disconnect! (+${elapsed}s since alert)`
         )
 
         bot.quit()
