@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-04-07 (stability fixes)
+- **fix**  `bot.js` — `bot.on('spawn')` → `bot.once('spawn')`; prevents triggers being re-registered on every dimension change (mineflayer re-emits `spawn` on `respawn` packets from `/warp`, `/skyblock`, etc.), which caused duplicate polling intervals and double action stack executions
+- **fix**  `triggers/index.js` — added module-level `actionChain` promise queue; all `fire()` calls append to the tail via `.then()` so action stacks from different triggers are serialised through a single queue; trigger polling intervals remain fully parallel; panic `bot.quit()` in `playerRadius` bypasses the queue intentionally
+- **fix**  `triggers/playerRadius.js`, `actions/disconnect.js` — set `bot._quitting = true` before `bot.quit()` so the action executor can detect a closing connection and abort the chain cleanly instead of issuing commands to a dead socket
+- **fix**  `actions/index.js` — `executeActions` now checks `bot._quitting` at each step and breaks early; accepts `context` as a third arg (trigger data forwarded from `fire()`); supports optional `opts.timeoutMs` per action via `Promise.race` to prevent a stuck pathfinder from hanging the entire chain indefinitely
+- **arch** `ARCHITECTURE.md` — updated triggers/actions sections, boot sequence, data-flow diagram, and Extending guide to reflect all five stability fixes above
+
 ## 2026-04-07
 - **arch** Added `ARCHITECTURE.md` — full system map (server→proxy→mc-protocol→mineflayer→your code), TCP pipeline, mineflayer plugin list, world-interaction table, velocity bug analysis
 - **arch** Added compact system map + `ARCHITECTURE.md` reference to `.cursor/rules/mineflayer-bots.mdc`

@@ -172,8 +172,13 @@
 ║ │ │  triggers/  ──────────────────────────────────────────────────────  │ │    ║
 ║ │ │                                                                     │ │    ║
 ║ │ │  index.js   registry: { playerRadius, blockNearby, onSpawn }       │ │    ║
+║ │ │             let actionChain = Promise.resolve()  ← global queue   │ │    ║
 ║ │ │             registerTrigger(bot, cfg):                              │ │    ║
-║ │ │               fire = (ctx) => executeActions(bot, cfg.actions)      │ │    ║
+║ │ │               fire = (ctx) => {                                     │ │    ║
+║ │ │                 if (bot._quitting) return                           │ │    ║
+║ │ │                 actionChain = actionChain                           │ │    ║
+║ │ │                   .then(() => executeActions(bot,cfg.actions,ctx)) │ │    ║
+║ │ │               }  ← serialises execution; sensing stays parallel    │ │    ║
 ║ │ │               registry[cfg.type](bot, cfg.options, fire)            │ │    ║
 ║ │ │                                                                     │ │    ║
 ║ │ │  playerRadius.js                                                    │ │    ║
@@ -198,8 +203,11 @@
 ║ │ ┌─────────────────────────────────────────────────────────────────────┐ │    ║
 ║ │ │  actions/  ───────────────────────────────────────────────────────  │ │    ║
 ║ │ │                                                                     │ │    ║
-║ │ │  index.js   executeActions(bot, actionConfigs)                      │ │    ║
+║ │ │  index.js   executeActions(bot, actionConfigs, context={})          │ │    ║
 ║ │ │             for...of ← sequential, fully awaited                    │ │    ║
+║ │ │             bot._quitting check per step ← aborts chain on quit    │ │    ║
+║ │ │             opts.timeoutMs ← optional per-action timeout           │ │    ║
+║ │ │             context passed as 3rd arg to every handler             │ │    ║
 ║ │ │             try/catch per action ← logs warn, continues stack       │ │    ║
 ║ │ │                                                                     │ │    ║
 ║ │ │  breakBlock.js        world.getNearestBlock()                       │ │    ║
@@ -369,11 +377,11 @@ node bot.js sentinel
   ├─ bot.on('kicked')  → formatKickReason → process.exit(1)
   ├─ bot.on('end')     → process.exit(0)
   │
-  └─ bot.on('spawn')
-       ├─ (optional) mineflayerViewer(bot, { port, firstPerson })
+  └─ bot.once('spawn')          ← once(), not on() — prevents re-registration
+       ├─ (optional) mineflayerViewer(bot, { port, firstPerson })         on dimension change
        └─ for cfg of profile.triggers:
             registerTrigger(bot, cfg)
-              ├─ fire = (ctx) => executeActions(bot, cfg.actions)
+              ├─ fire = (ctx) => actionChain.then(executeActions(bot,cfg.actions,ctx))
               └─ registry[cfg.type](bot, cfg.options, fire)
 ```
 
@@ -395,10 +403,11 @@ profile.triggers[n]  │  type: 'playerRadius'                   │
                        → match! → fire(context)
                                     │
                                     ▼
-                     triggers/index.js  fire()
-                       executeActions(bot, cfg.actions)
-                                    │
+                     triggers/index.js  fire(context)
+                       actionChain.then(executeActions(bot, cfg.actions, context))
+                                    │         ← queued; previous chain must finish
                               for...of  (sequential await)
+                              bot._quitting check per step
                                     │
                        ┌────────────┴────────────┐
                        ▼                         ▼
@@ -513,7 +522,9 @@ Run with: `node bot.js sentinel` | `node bot.js debug` | `node bot.js trader`
 ## 8 · Extending the System
 
 ### New Action
-1. `actions/myAction.js` → `async function myAction(bot, options) {}; module.exports = myAction`
+1. `actions/myAction.js` → `async function myAction(bot, options, context) {}; module.exports = myAction`
+   - `context` carries trigger data (e.g. `context.block`, `context.username`) — use or ignore as needed.
+   - Add `timeoutMs` to the action's `options` in a profile to abort the step after N ms.
 2. Add `myAction: require('./myAction')` to registry in `actions/index.js`
 3. Use `{ type: 'myAction', options: { … } }` in a profile's `actions` array
 

@@ -3,6 +3,9 @@
 // fire afterward and handle process exit.
 async function disconnect(bot) {
   console.log('[ACTION] Disconnecting...')
+  // Set the quitting flag so any parallel or queued action chains abort cleanly
+  // instead of issuing bot commands to a closing socket.
+  bot._quitting = true
   bot.quit()
 }
 

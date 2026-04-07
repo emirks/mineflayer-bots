@@ -90,6 +90,10 @@ function register(bot, options, fire) {
           `(${distance.toFixed(2)} m) — emergency disconnect! (+${elapsed}s since alert)`
         )
 
+        // Signal the action executor to abort any in-flight chain before we
+        // kill the connection.  The executor checks this flag at each step so
+        // it stops issuing bot commands to a closing socket.
+        bot._quitting = true
         bot.quit()
       }
     }, panicIntervalMs)

@@ -66,7 +66,11 @@ bot.on('end', (reason) => {
 })
 
 // ─── Spawn ────────────────────────────────────────────────────────────────────
-bot.on('spawn', () => {
+// Use once() — mineflayer re-emits 'spawn' on every dimension change (respawn
+// packet from the server, e.g. /warp or /skyblock crossing a world boundary).
+// Registering triggers more than once would create duplicate intervals and fire
+// action stacks multiple times.
+bot.once('spawn', () => {
   console.log('[SPAWN] Bot is in the world\n')
 
   // ── Optional viewer ────────────────────────────────────────────────────────
