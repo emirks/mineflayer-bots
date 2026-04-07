@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-04-08
+- **feat** `lib/createBotSession.js` — records `bot._base = bot.entity.position.clone()` on first spawn so triggers can reference the bot's home position
+- **feat** `triggers/index.js` — `fire()` now checks `triggerConfig.baseZone` before queuing an action chain; if the bot is farther than `baseZone.radius` blocks from `bot._base` the chain is silently skipped (sensing keeps running); distance is logged at info level for visibility
+- **feat** `profiles/sentinel.js` — added `baseZone: { radius: 30 }` to the `playerRadius` trigger; sentinel actions only execute when within 30 blocks of spawn; logs `[TRIGGER] skipped — Xm from base` when outside
+- **feat** `lib/logger.js` — changed log directory layout to `logs/<profile>/<YYYY-MM-DD>/run_<N>/session.log`; run number auto-increments per process start (reconnects share the same run dir); exposed `log.runDir` on the logger object; added `createSnapshotWriter(runDir)` export that opens `snapshots.jsonl` (NDJSON, append-only) in the same run directory
+- **feat** `lib/snapshot.js` (new) — extracted `buildSnapshot(bot)` into its own module; extends snapshot with: look direction (yaw/pitch), velocity, gameMode, biome, heldItem, armor slots (helmet/chest/leggings/boots), surroundings (below/legs/head block names), nearby blocks with exact positions within 8 blocks (nearest 20 non-air via `bot.findBlocks`); all floats rounded (health 1dp, look 2dp, vel 3dp); all risky calls wrapped in try/catch
+- **refactor** `lib/createBotSession.js` — removed inline `buildSnapshot`; now imports from `lib/snapshot.js`; starts a 1-second `setInterval` after `spawn` writing to `snapshots.jsonl`; interval cleared on `end` and `kicked`
+- **feat** `lib/createBotSession.js` — added `bot.on('message')` listener; logs every incoming in-game chat/system message as `[CHAT] <text>` via the session logger (console + `session.log`)
+
+## 2026-04-07 (per-profile account isolation)
+- **refactor** `profiles/_base.js` — removed `username` and `profilesFolder` from `bot`; these have no sensible shared default and must be per-profile so concurrent bots never share an account (server blocks duplicate logins); updated comment to document the required pattern
+- **refactor** `profiles/sentinel.js` — added explicit `bot: { ...base.bot, username, profilesFolder: './auth-cache/sentinel' }`
+- **refactor** `profiles/trader.js` — same; `username` left blank (different account required for concurrent run with sentinel)
+- **refactor** `profiles/debug.js` — same; `username` left blank with note that it can share sentinel's account if not running concurrently
+
+## 2026-04-07 (logging system)
+- **feat** `lib/logger.js` (new) — `createLogger(name)` factory; module-level registry so BotManager and createBotSession share one file stream per profile; per-bot output to `logs/<name>.log` (plain text, append); coloured console output with ANSI (no deps); bot name tag colour-coded from a pool for multi-bot terminal readability; `sessionMark(label)` writes a visual separator in file and console at every connect attempt; no external dependencies
+- **feat** `lib/createBotSession.js` — creates `bot.log = createLogger(profileName)` before any log output; spawn event now logs a state snapshot (position, health, food); all bare `console.*` calls replaced with `bot.log.*`
+- **feat** `lib/BotManager.js` — creates `this.log = createLogger(profileName)` in constructor (same registry instance as session); calls `this.log.sessionMark(...)` at start of each connect attempt so reconnect cycles are clearly delimited in the log file; `_setState` logs enriched state transition line (prev→next, uptime, attempt); all bare `console.*` replaced with `this.log.*`; added `_fmtUptime` helper
+- **refactor** `triggers/index.js`, `triggers/playerRadius.js`, `triggers/blockNearby.js`, `triggers/onSpawn.js` — all `console.*` replaced with `bot.log.*` at appropriate levels (info/warn/error)
+- **refactor** `actions/index.js`, `actions/breakAllBlocks.js`, `actions/breakBlock.js`, `actions/disconnect.js`, `actions/dropItems.js`, `actions/goToBlock.js`, `actions/pickupItems.js`, `actions/sendChat.js`, `actions/takeFromChest.js`, `actions/startDebugScan.js` — all `console.*` replaced with `bot.log.*`
+- **docs** `DEVELOPMENT.md` — logging todo items marked complete; added remaining items (in-game chat log, periodic snapshots)
+
+## 2026-04-07 (GUI dashboard)
+- **feat** `gui/server.js` (new) — Express + Socket.io server; serves dashboard; REST API for instance CRUD (create/update/delete/start/stop) and profile code read/write; forwards all EventBus events to connected browser sockets; ring-buffer log of last 200 entries sent to new connections; SIGINT stops all bots gracefully
+- **feat** `gui/public/index.html` + `style.css` + `app.js` (new) — browser dashboard: bot grid with per-instance state badges (idle/connecting/connected/disconnected/reconnecting/stopped/failed), live uptime counter, Connect/Stop/Edit buttons; Add Bot modal with settings form + Profile Code editor tab (reads/writes .js profile files, clears require cache on save); event log panel; fully dark-themed (GitHub-dark palette)
+- **feat** `instances.json` (new) — persisted bot instance configs (label, profile template, username, host, port, auth, viewerPort, reconnect); each instance gets its own auth-cache subfolder for account isolation
+- **feat** `orchestrator.js` — added `spawnInstance(instance)`: merges per-instance overrides (username, host, viewerPort) onto the named profile template; sets `profilesFolder: ./auth-cache/<safeUser>` per account; uses instance.id as the BotManager map key; exported in module.exports
+- **fix**  `lib/BotManager.js` — added `profileConfig` field; `createBotSession` now called with `profileConfig || profileName`; `CONNECTED` state now fires on `bot.once('login')` (previously fired immediately after TCP connect, before the server confirmed login); `_attempt` counter reset on successful login
+- **fix**  `lib/createBotSession.js` — parameter renamed to `profileNameOrConfig`; accepts a string (loads profile file as before) or a pre-built config object (used by `spawnInstance` for GUI instances); `profileName` derived from `_instanceId` / `_profileTemplate` for log labels
+- **chore** `package.json` — added `express ^5.2.1`, `socket.io ^4.8.3`; added `"gui": "node gui/server.js"` script
+
 ## 2026-04-07 (documentation sync)
 - **docs** `ARCHITECTURE.md` — full snapshot update: corrected bot.js box (now thin wrapper), updated triggers/index.js box (createTriggerRegistry factory + priority queue), updated playerRadius/blockNearby/onSpawn with `returns { cancel }` and panic-path detail, updated lib/skills.js to show `blockDelay(bot)` replacing runtimeConfig, updated lib/runtimeConfig.js box to LEGACY status, added lib/createBotSession.js / lib/BotManager.js / lib/EventBus.js / orchestrator.js boxes to §1 YOUR CODE, rewrote §2 Boot Sequence with dual paths (bot.js + orchestrator.js), rewrote §3 Trigger→Action Data Flow to show priority queue and emergency path, updated §6 package table loader column, updated §7 run commands, rewrote §8 Extending with cancel pattern + EventBus example, added §9 Orchestration Layer (isolation table, BotManager state diagram, EventBus event catalogue, future GUI integration pattern)
 - **docs** `.cursor/rules/mineflayer-bots.mdc` — added ARCHITECTURE.md maintenance contract: add/update/remove in sync with code; never strip accurate detail; changelog vs snapshot discipline explained

@@ -315,6 +315,44 @@
 ║ │ │     Resource          │  │  skills.js now uses blockDelay(bot)     │  │    ║
 ║ │ │                       │  │  which reads bot._config per-call.      │  │    ║
 ║ │ │                       │  └─────────────────────────────────────────┘  │    ║
+║ │ │                       │                                               │    ║
+║ │ │                       │  ┌─────────────────────────────────────────┐  │    ║
+║ │ │                       │  │  lib/logger.js                          │  │    ║
+║ │ │                       │  │  createLogger(name) → logger            │  │    ║
+║ │ │                       │  │    Per-name registry (one per process)  │  │    ║
+║ │ │                       │  │    Writes to session.log + console      │  │    ║
+║ │ │                       │  │    logger.runDir → run directory path   │  │    ║
+║ │ │                       │  │    logger.sessionMark(label)            │  │    ║
+║ │ │                       │  │                                         │  │    ║
+║ │ │                       │  │  createSnapshotWriter(runDir) → writer  │  │    ║
+║ │ │                       │  │    writer.write(obj) → snapshots.jsonl  │  │    ║
+║ │ │                       │  │    NDJSON: one JSON object per line     │  │    ║
+║ │ │                       │  │                                         │  │    ║
+║ │ │                       │  │  Layout per run:                        │  │    ║
+║ │ │                       │  │    logs/<name>/<YYYY-MM-DD>/run_<N>/   │  │    ║
+║ │ │                       │  │      session.log    ← text events       │  │    ║
+║ │ │                       │  │      snapshots.jsonl ← 1 obj/sec       │  │    ║
+║ │ │                       │  │  run_N increments per process start;   │  │    ║
+║ │ │                       │  │  reconnects share the same run dir.    │  │    ║
+║ │ │                       │  └─────────────────────────────────────────┘  │    ║
+║ │ │                       │                                               │    ║
+║ │ │                       │  ┌─────────────────────────────────────────┐  │    ║
+║ │ │                       │  │  lib/snapshot.js                        │  │    ║
+║ │ │                       │  │  buildSnapshot(bot) → plain object      │  │    ║
+║ │ │                       │  │    All fields degrade to null on miss   │  │    ║
+║ │ │                       │  │    No I/O — safe to call every second   │  │    ║
+║ │ │                       │  │  Fields:                                │  │    ║
+║ │ │                       │  │    t · pos · look(yaw,pitch) · vel      │  │    ║
+║ │ │                       │  │    health · food · sat · xp · time      │  │    ║
+║ │ │                       │  │    rain · gameMode · biome · heldItem   │  │    ║
+║ │ │                       │  │    armor{helmet,chest,leggings,boots}   │  │    ║
+║ │ │                       │  │    inv · surroundings{below,legs,head}  │  │    ║
+║ │ │                       │  │    players[{name,dist}]                 │  │    ║
+║ │ │                       │  │    entities{type:count} within 32 blks  │  │    ║
+║ │ │                       │  │    nearbyBlocks[{name,pos,dist}]        │  │    ║
+║ │ │                       │  │      nearest 20 non-air within 8 blks   │  │    ║
+║ │ │                       │  │      via bot.findBlocks (~5000 voxels)  │  │    ║
+║ │ │                       │  └─────────────────────────────────────────┘  │    ║
 ║ │ └──────────────────────┘                                               │    ║
 ║ │                                                                          │    ║
 ║ │ ┌─────────────────────────────────────────────────────────────────────┐ │    ║
@@ -333,16 +371,22 @@
 ║ │ │  ⑥ mc.init(bot)  → loadPlugin(pathfinder+collectblock)           │ │    ║
 ║ │ │  ⑦ { registerTrigger, stopAll } = createTriggerRegistry()        │ │    ║
 ║ │ │     ← per-session; isolated queue + cleanup handles               │ │    ║
-║ │ │  ⑧ bot.once('spawn'):                                             │ │    ║
+║ │ │  ⑧ snapshots = createSnapshotWriter(log.runDir)                  │ │    ║
+║ │ │     ← opens snapshots.jsonl in the run directory                  │ │    ║
+║ │ │  ⑨ bot.once('spawn'):                                             │ │    ║
 ║ │ │       mineflayerViewer(bot, ...) if viewer.enabled                │ │    ║
 ║ │ │       for cfg of profile.triggers: registerTrigger(bot, cfg)      │ │    ║
-║ │ │  ⑨ promise = new Promise((resolve, reject) => {                  │ │    ║
-║ │ │       bot.on('login')  → log                                      │ │    ║
-║ │ │       bot.on('error')  → log (does NOT reject)                   │ │    ║
-║ │ │       bot.on('kicked') → stopAll(); reject({ type:'kicked' })    │ │    ║
-║ │ │       bot.on('end')    → stopAll()                                │ │    ║
-║ │ │                           resolve({ reason, intentional:         │ │    ║
-║ │ │                             bot._quitting })                      │ │    ║
+║ │ │       setInterval(1000) → buildSnapshot(bot) → snapshots.write()  │ │    ║
+║ │ │         buildSnapshot: see lib/snapshot.js for full field list     │ │    ║
+║ │ │  ⑩ promise = new Promise((resolve, reject) => {                  │ │    ║
+║ │ │       bot.on('login')   → log                                     │ │    ║
+║ │ │       bot.on('message') → log [CHAT] (all in-game chat)          │ │    ║
+║ │ │       bot.on('error')   → log (does NOT reject)                  │ │    ║
+║ │ │       bot.on('kicked')  → clearInterval · stopAll()              │ │    ║
+║ │ │                            reject({ type:'kicked' })             │ │    ║
+║ │ │       bot.on('end')     → clearInterval · stopAll()              │ │    ║
+║ │ │                            resolve({ reason, intentional:        │ │    ║
+║ │ │                              bot._quitting })                     │ │    ║
 ║ │ │     })                                                            │ │    ║
 ║ │ │                                                                   │ │    ║
 ║ │ │  Does NOT call process.exit() — caller owns process lifecycle    │ │    ║
