@@ -7,10 +7,10 @@
 function register(bot, options, fire) {
   const { delayMs = 10000 } = options
 
-  console.log(`[TRIGGER] onSpawn armed — firing in ${delayMs}ms`)
+  bot.log.info(`[TRIGGER] onSpawn armed — firing in ${delayMs}ms`)
 
   const timer = setTimeout(() => {
-    console.log(`[TRIGGER] onSpawn fired`)
+    bot.log.info('[TRIGGER] onSpawn fired')
     fire({})
   }, delayMs)
 
