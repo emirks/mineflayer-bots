@@ -4,8 +4,8 @@ const { executeActions } = require('../actions')
 // Add new trigger types here by mapping a name to its handler module.
 const registry = {
   playerRadius: require('./playerRadius'),
-  blockNearby: require('./blockNearby'),
-  onSpawn: require('./onSpawn'),
+  blockNearby : require('./blockNearby'),
+  onSpawn     : require('./onSpawn'),
 }
 
 // ─── createTriggerRegistry ────────────────────────────────────────────────────
@@ -40,8 +40,8 @@ const registry = {
 
 function createTriggerRegistry() {
   let running = false
-  const queue = []    // { priority, label, fn }
-  const cleanups = [] // cancel() functions returned by trigger handlers
+  const queue    = []   // { priority, label, fn }
+  const cleanups = []   // cancel() functions returned by trigger handlers
 
   // Drains the queue, highest-priority first, one chain at a time.
   async function flush() {
@@ -63,20 +63,37 @@ function createTriggerRegistry() {
     const handler = registry[triggerConfig.type]
 
     if (!handler) {
-      console.warn(`[TRIGGER] Unknown trigger type "${triggerConfig.type}" — skipping.`)
+      bot.log.warn(`[TRIGGER] Unknown trigger type "${triggerConfig.type}" — skipping.`)
       return
     }
 
-    const label = triggerConfig.type
+    const label    = triggerConfig.type
     const priority = triggerConfig.priority ?? 0
 
     // fire() is the bridge between a trigger and its action stack.
     // The trigger calls fire(context) — it knows nothing about what runs.
     // context carries trigger-specific data so actions can use it directly.
+    const baseZone = triggerConfig.baseZone   // optional: { radius: <blocks> }
+
     const fire = (context = {}) => {
       if (bot._quitting) return Promise.resolve()
 
-      console.log(`[TRIGGER] "${label}" queuing action chain (priority ${priority})`)
+      // ── Base zone guard ───────────────────────────────────────────────────
+      // If the trigger declares a baseZone, skip action chain when the bot is
+      // outside that radius from its recorded spawn position (bot._base).
+      // Sensing (the trigger's polling interval) keeps running — this only
+      // blocks the action chain, not the detection.
+      if (baseZone && bot._base) {
+        const dist = bot.entity?.position?.distanceTo(bot._base) ?? Infinity
+        if (dist > baseZone.radius) {
+          bot.log.info(
+            `[TRIGGER] "${label}" skipped — ${dist.toFixed(1)} blocks from base (limit ${baseZone.radius})`
+          )
+          return Promise.resolve()
+        }
+      }
+
+      bot.log.info(`[TRIGGER] "${label}" queuing action chain (priority ${priority})`)
 
       // Each fire() returns a Promise that resolves when THIS chain finishes
       // (after waiting its turn in the queue).
@@ -87,13 +104,13 @@ function createTriggerRegistry() {
           fn: async () => {
             if (bot._quitting) { resolve(); return }
             await executeActions(bot, triggerConfig.actions, context).catch((err) =>
-              console.error(`[TRIGGER] "${label}" action chain error — ${err.message}`)
+              bot.log.error(`[TRIGGER] "${label}" action chain error — ${err.message}`)
             )
             resolve()
           },
         })
         flush().catch((err) =>
-          console.error('[TRIGGER] Queue flush error —', err.message)
+          bot.log.error(`[TRIGGER] Queue flush error — ${err.message}`)
         )
       })
     }
@@ -102,7 +119,7 @@ function createTriggerRegistry() {
     const cleanup = handler(bot, triggerConfig.options || {}, fire)
     if (cleanup?.cancel) cleanups.push(cleanup.cancel)
 
-    console.log(`[TRIGGER] Registered "${label}" (priority ${priority})`)
+    bot.log.info(`[TRIGGER] Registered "${label}" (priority ${priority})`)
   }
 
   function stopAll() {
