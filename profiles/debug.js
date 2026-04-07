@@ -11,7 +11,7 @@ module.exports = {
   triggers: [
     {
       type: 'onSpawn',
-      options: { delayMs: 10000 },
+      options: { delayMs: 1000 },
       actions: [
         { type: 'sendChat', options: { message: '/skyblock', delayAfterMs: 1000 } },
         { type: 'startDebugScan', options: { radius: 8, intervalMs: 5000 } },

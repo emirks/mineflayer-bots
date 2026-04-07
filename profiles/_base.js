@@ -32,7 +32,7 @@ module.exports = {
   // For noisy ViaVersion "Chunk size… was read" lines, try bot.hideErrors: true
   // (silences many parser warnings; use only if you accept hidden parse errors).
   protocolDebug: {
-    enabled: true,
+    enabled: false,
     logToConsole: true,
     // Relative to cwd. Use true for logs/protocol-<timestamp>.log per run.
     // Override with env: MC_PROTOCOL_LOG_FILE=./logs/my-run.log
