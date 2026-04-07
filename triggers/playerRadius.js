@@ -17,15 +17,15 @@ const world = require('../lib/world')
 
 function register(bot, options, fire) {
   const {
-    printRadius = 50,
-    alertRadius = 20,
-    panicRadius = 5,
+    printRadius     = 50,
+    alertRadius     = 20,
+    panicRadius     = 5,
     checkIntervalMs = 500,
     panicIntervalMs = 100,
   } = options
 
-  let alerted = false
-  let panicked = false
+  let alerted   = false
+  let panicked  = false
   // Hoisted so cancel() can clear it even if startPanicWatch() was called.
   let fastInterval = null
 
@@ -36,7 +36,7 @@ function register(bot, options, fire) {
     const visible = world.getNearbyPlayers(bot, printRadius)
     for (const entity of visible) {
       const distance = bot.entity.position.distanceTo(entity.position)
-      console.log(`[DIST]    ${entity.username.padEnd(16)} → ${distance.toFixed(2)} blocks`)
+      bot.log.info(`[DIST] ${entity.username.padEnd(16)} → ${distance.toFixed(2)} blocks`)
     }
 
     if (!alerted) {
@@ -52,16 +52,15 @@ function register(bot, options, fire) {
 
         bot._alertTime = Date.now()
         const distance = bot.entity.position.distanceTo(closest.position)
-        console.log(
-          `\n[TRIGGER] ALERT — ${closest.username} within ${alertRadius} blocks ` +
-          `(${distance.toFixed(2)} m) — running action stack + arming panic watch`
+        bot.log.warn(
+          `[TRIGGER] ALERT — ${closest.username} within ${alertRadius} blocks ` +
+          `(${distance.toFixed(2)} m) — running action stack + arming panic watch`,
         )
 
         // Kick off action stack (async, non-blocking).
-        // Chain .then() here — not in any action — because this trigger owns the timer.
         fire({ username: closest.username, distance }).then(() => {
           const elapsed = ((Date.now() - bot._alertTime) / 1000).toFixed(2)
-          console.log(`[TRIGGER] Action chain finished — ${elapsed}s since alert.`)
+          bot.log.info(`[TRIGGER] Action chain finished — ${elapsed}s since alert.`)
         })
 
         // Immediately arm the fast panic watch
@@ -76,7 +75,7 @@ function register(bot, options, fire) {
     // Without this guard, the condition `distanceTo < 0` would never be true
     // and the interval would run forever doing nothing useful.
     if (panicRadius <= 0) {
-      console.log('[TRIGGER] panicRadius ≤ 0 — panic watch disabled')
+      bot.log.info('[TRIGGER] panicRadius ≤ 0 — panic watch disabled')
       return
     }
 
@@ -94,10 +93,12 @@ function register(bot, options, fire) {
         clearInterval(fastInterval)
 
         const distance = bot.entity.position.distanceTo(closest.position)
-        const elapsed = bot._alertTime ? ((Date.now() - bot._alertTime) / 1000).toFixed(2) : '?'
-        console.log(
-          `\n[TRIGGER] PANIC — ${closest.username} within ${panicRadius} blocks ` +
-          `(${distance.toFixed(2)} m) — emergency disconnect! (+${elapsed}s since alert)`
+        const elapsed  = bot._alertTime
+          ? ((Date.now() - bot._alertTime) / 1000).toFixed(2)
+          : '?'
+        bot.log.error(
+          `[TRIGGER] PANIC — ${closest.username} within ${panicRadius} blocks ` +
+          `(${distance.toFixed(2)} m) — emergency disconnect! (+${elapsed}s since alert)`,
         )
 
         // Signal the action executor to abort any in-flight chain before we
