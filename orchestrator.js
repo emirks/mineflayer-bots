@@ -1,3 +1,4 @@
+const path = require('path')
 const { BotManager, BotState } = require('./lib/BotManager')
 const EventBus = require('./lib/EventBus')
 
@@ -90,6 +91,60 @@ function getBotStates() {
   return Array.from(managers.values()).map(m => m.getSnapshot())
 }
 
+/**
+ * Starts a bot using a GUI instance config.
+ * Merges per-instance overrides (username, host, viewerPort, auth cache path)
+ * on top of the named profile template, then calls spawnBot with the merged config.
+ *
+ * @param {{ id:string, profile:string, label?:string, username?:string,
+ *           host?:string, port?:number, auth?:string,
+ *           viewerEnabled?:boolean, viewerPort?:number,
+ *           reconnect?:boolean, maxRetries?:number, baseDelayMs?:number }} instance
+ * @returns {BotManager}
+ */
+function spawnInstance(instance) {
+  let base
+  try {
+    base = require(`./profiles/${instance.profile}`)
+  } catch {
+    throw new Error(`Unknown profile template "${instance.profile}". Check profiles/ directory.`)
+  }
+
+  // Sanitise username so it's safe as a folder name for auth-cache isolation
+  const safeUser = (instance.username || base.bot.username)
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+
+  const profileConfig = {
+    ...base,
+    bot: {
+      ...base.bot,
+      username:       instance.username       || base.bot.username,
+      host:           instance.host           || base.bot.host,
+      port:           Number(instance.port)   || base.bot.port,
+      auth:           instance.auth           || base.bot.auth,
+      // Each account gets its own auth-cache subfolder to avoid token collisions
+      profilesFolder: path.join('./auth-cache', safeUser),
+    },
+    viewer: {
+      ...base.viewer,
+      enabled:     instance.viewerEnabled ?? base.viewer?.enabled ?? true,
+      port:        Number(instance.viewerPort) || base.viewer?.port || 3000,
+      firstPerson: instance.viewerFirstPerson ?? base.viewer?.firstPerson ?? false,
+    },
+    // Meta — used by createBotSession for log labels
+    _instanceId:      instance.id,
+    _profileTemplate: instance.profile,
+  }
+
+  return spawnBot({
+    profile:      instance.id,   // use instance ID as the manager-map key
+    profileConfig,
+    reconnect:    instance.reconnect   ?? true,
+    maxRetries:   instance.maxRetries  ?? Infinity,
+    baseDelayMs:  instance.baseDelayMs ?? 5000,
+  })
+}
+
 // ── CLI entry point ───────────────────────────────────────────────────────────
 if (require.main === module) {
   const profiles = process.argv.slice(2)
@@ -119,4 +174,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { spawnBot, stopBot, getBotStates, EventBus, BotState }
+module.exports = { spawnBot, spawnInstance, stopBot, getBotStates, EventBus, BotState }

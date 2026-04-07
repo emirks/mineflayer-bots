@@ -1,0 +1,14 @@
+[
+  {
+    "id": "bot-1775594702439",
+    "label": "Sentinel",
+    "profile": "sentinel",
+    "username": "babapro334233outlook.com",
+    "host": "donutsmp.net",
+    "port": 25565,
+    "auth": "microsoft",
+    "viewerEnabled": true,
+    "viewerPort": 3000,
+    "reconnect": true
+  }
+]

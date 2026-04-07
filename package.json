@@ -9,13 +9,16 @@
     ]
   },
   "scripts": {
-    "start": "node bot.js"
+    "start": "node bot.js",
+    "gui":   "node gui/server.js"
   },
   "keywords": [ ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1",
     "canvas": "^3.2.3",
     "minecraft-data": "^3.109.0",
     "mineflayer": "^4.37.0",
