@@ -23,6 +23,7 @@ const mineflayer = require('mineflayer')
 const { registerTrigger } = require('./triggers')
 const mc = require('./lib/mcdata')
 const { attachProtocolDebug, formatKickReason } = require('./lib/protocolDebug')
+const { applyVelocityPatch } = require('./lib/velocityPatch')
 
 const { bot: botConfig, viewer: viewerConfig, triggers, protocolDebug } = profile
 
@@ -36,6 +37,7 @@ const protocolDebugMerged = {
     : {}),
 }
 attachProtocolDebug(bot, protocolDebugMerged)
+applyVelocityPatch(bot)
 
 // Stubs for mindcraft-specific bot properties used inside lib/skills.js
 bot.output = ''
