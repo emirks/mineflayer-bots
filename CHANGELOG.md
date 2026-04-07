@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-04-07 (remaining stability fixes)
+- **feat** `profiles/sentinel.js`, `profiles/trader.js`, `profiles/debug.js` — added `timeoutMs` to every action that can block (breakAllBlocks: 300s, takeFromChest: 60s, pickupItems: 30s, dropItems: 15s, sendChat: 4–5s); startDebugScan and disconnect have no timeout since they return/exit immediately
+- **fix**  `triggers/playerRadius.js` — added `panicRadius <= 0` early-return guard in `startPanicWatch()`; previously the interval ran forever doing nothing when panicRadius was 0 (condition `distanceTo < 0` is never true)
+- **fix**  `triggers/playerRadius.js`, `actions/disconnect.js` — call `bot.pathfinder.stop()` (with guard) before `bot.quit()` so any in-flight `pathfinder.goto()` rejects immediately rather than waiting for the socket-close error to propagate; makes the action-chain abort faster and cleaner
+
 ## 2026-04-07 (stability fixes)
 - **fix**  `bot.js` — `bot.on('spawn')` → `bot.once('spawn')`; prevents triggers being re-registered on every dimension change (mineflayer re-emits `spawn` on `respawn` packets from `/warp`, `/skyblock`, etc.), which caused duplicate polling intervals and double action stack executions
 - **fix**  `triggers/index.js` — added module-level `actionChain` promise queue; all `fire()` calls append to the tail via `.then()` so action stacks from different triggers are serialised through a single queue; trigger polling intervals remain fully parallel; panic `bot.quit()` in `playerRadius` bypasses the queue intentionally

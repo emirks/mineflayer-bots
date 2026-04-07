@@ -25,13 +25,14 @@ module.exports = {
           options: {
             blockName: 'spawner',
             searchRadius: 64,
-            maxRounds: 500,   // safety cap — stops after this many re-scan passes
-            rescanDelayMs: 300,   // wait between re-scan rounds (ms)
+            maxRounds: 500,      // safety cap — stops after this many re-scan passes
+            rescanDelayMs: 300,  // wait between re-scan rounds (ms)
             blockDelayMinMs: 400,   // min random pause between different block positions (ms)
-            blockDelayMaxMs: 800,  // max random pause between different block positions (ms)
+            blockDelayMaxMs: 800,   // max random pause between different block positions (ms)
+            timeoutMs: 300000,   // 5 min wall-clock cap (maxRounds guards loops; this guards stuck navigation)
           },
         },
-        { type: 'dropItems', options: { item: 'spawner' } },
+        { type: 'dropItems', options: { item: 'spawner', timeoutMs: 15000 } },
         { type: 'disconnect' },
       ],
     },

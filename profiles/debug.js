@@ -13,7 +13,9 @@ module.exports = {
       type: 'onSpawn',
       options: { delayMs: 1000 },
       actions: [
-        { type: 'sendChat', options: { message: '/skyblock', delayAfterMs: 1000 } },
+        // delayAfterMs: 1000 → timeout gives 3s of extra buffer
+        { type: 'sendChat', options: { message: '/skyblock', delayAfterMs: 1000, timeoutMs: 4000 } },
+        // startDebugScan returns immediately (background interval) — no timeout needed
         { type: 'startDebugScan', options: { radius: 8, intervalMs: 5000 } },
       ],
     },

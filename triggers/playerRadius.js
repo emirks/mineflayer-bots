@@ -70,6 +70,14 @@ function register(bot, options, fire) {
 
   // ── Fast interval: emergency disconnect if player gets too close ───────────
   function startPanicWatch() {
+    // panicRadius <= 0 means "panic watch disabled" — skip silently.
+    // Without this guard, the condition `distanceTo < 0` would never be true
+    // and the interval would run forever doing nothing useful.
+    if (panicRadius <= 0) {
+      console.log('[TRIGGER] panicRadius ≤ 0 — panic watch disabled')
+      return
+    }
+
     const fastInterval = setInterval(() => {
       if (panicked || !bot.entity) return
 
@@ -94,6 +102,9 @@ function register(bot, options, fire) {
         // kill the connection.  The executor checks this flag at each step so
         // it stops issuing bot commands to a closing socket.
         bot._quitting = true
+        // Stop pathfinder immediately so any awaiting goto() rejects right now
+        // instead of waiting for the socket-close error to propagate.
+        if (bot.pathfinder) bot.pathfinder.stop()
         bot.quit()
       }
     }, panicIntervalMs)

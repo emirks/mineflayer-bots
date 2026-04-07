@@ -21,7 +21,8 @@ module.exports = {
       type: 'onSpawn',
       options: { delayMs: 3000 },
       actions: [
-        { type: 'sendChat', options: { message: '/warp market', delayAfterMs: 2000 } },
+        // delayAfterMs: 2000 → timeout gives 3s of extra buffer
+        { type: 'sendChat', options: { message: '/warp market', delayAfterMs: 2000, timeoutMs: 5000 } },
       ],
     },
 
@@ -34,9 +35,9 @@ module.exports = {
         checkIntervalMs: 1000,
       },
       actions: [
-        { type: 'takeFromChest', options: { itemName: 'bone', num: -1 } },
-        { type: 'sendChat', options: { message: '/sell all', delayAfterMs: 1000 } },
-        { type: 'pickupItems', options: {} },
+        { type: 'takeFromChest', options: { itemName: 'bone', num: -1, timeoutMs: 60000 } },
+        { type: 'sendChat', options: { message: '/sell all', delayAfterMs: 1000, timeoutMs: 4000 } },
+        { type: 'pickupItems', options: { timeoutMs: 30000 } },
       ],
     },
 
