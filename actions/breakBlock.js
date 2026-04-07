@@ -9,12 +9,12 @@ async function breakBlock(bot, options) {
   const block = world.getNearestBlock(bot, blockName, searchRadius)
 
   if (!block) {
-    console.log(`[ACTION] No "${blockName}" found within ${searchRadius} blocks — skipping.`)
+    bot.log.info(`[ACTION] No "${blockName}" found within ${searchRadius} blocks — skipping.`)
     return
   }
 
   const { x, y, z } = block.position
-  console.log(`[ACTION] Breaking "${blockName}" at (${x}, ${y}, ${z})...`)
+  bot.log.info(`[ACTION] Breaking "${blockName}" at (${x}, ${y}, ${z})...`)
   await skills.breakBlockAt(bot, x, y, z)
 }
 

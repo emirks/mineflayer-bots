@@ -1,14 +1,14 @@
 // ─── Action registry ──────────────────────────────────────────────────────────
 // Add new action types here by mapping a name to its handler module.
 const registry = {
-  breakBlock: require('./breakBlock'),
+  breakBlock    : require('./breakBlock'),
   breakAllBlocks: require('./breakAllBlocks'),
-  disconnect: require('./disconnect'),
-  dropItems: require('./dropItems'),
-  goToBlock: require('./goToBlock'),
-  takeFromChest: require('./takeFromChest'),
-  pickupItems: require('./pickupItems'),
-  sendChat: require('./sendChat'),
+  disconnect    : require('./disconnect'),
+  dropItems     : require('./dropItems'),
+  goToBlock     : require('./goToBlock'),
+  takeFromChest : require('./takeFromChest'),
+  pickupItems   : require('./pickupItems'),
+  sendChat      : require('./sendChat'),
   startDebugScan: require('./startDebugScan'),
 }
 
@@ -30,19 +30,19 @@ const registry = {
 async function executeActions(bot, actionConfigs, context = {}) {
   for (const actionConfig of actionConfigs) {
     if (bot._quitting) {
-      console.log('[ACTION] Bot is disconnecting — aborting action chain.')
+      bot.log.info('[ACTION] Bot is disconnecting — aborting action chain.')
       break
     }
 
     const handler = registry[actionConfig.type]
 
     if (!handler) {
-      console.warn(`[ACTION] Unknown action type "${actionConfig.type}" — skipping.`)
+      bot.log.warn(`[ACTION] Unknown action type "${actionConfig.type}" — skipping.`)
       continue
     }
 
     const opts = actionConfig.options || {}
-    console.log(`[ACTION] → ${actionConfig.type}`)
+    bot.log.info(`[ACTION] → ${actionConfig.type}`)
 
     try {
       const run = handler(bot, opts, context)
@@ -59,7 +59,7 @@ async function executeActions(bot, actionConfigs, context = {}) {
         await run
       }
     } catch (err) {
-      console.warn(`[ACTION] "${actionConfig.type}" failed — ${err.message} — continuing.`)
+      bot.log.warn(`[ACTION] "${actionConfig.type}" failed — ${err.message} — continuing.`)
     }
   }
 }

@@ -1,8 +1,8 @@
 // Disconnects the bot from the server.
-// bot.quit() sends a clean disconnect packet — the 'end' event in bot.js will
-// fire afterward and handle process exit.
+// bot.quit() sends a clean disconnect packet — the 'end' event in createBotSession
+// will fire afterward and settle the session promise.
 async function disconnect(bot) {
-  console.log('[ACTION] Disconnecting...')
+  bot.log.info('[ACTION] Disconnecting...')
   // Set the quitting flag so any queued action chains abort cleanly instead of
   // issuing bot commands to a closing socket.
   bot._quitting = true

@@ -10,7 +10,7 @@ async function dropItems(bot, options) {
   const targets = items ?? (item ? [item] : [])
 
   if (targets.length === 0) {
-    console.warn('[ACTION] dropItems: no item(s) specified — skipping.')
+    bot.log.warn('[ACTION] dropItems: no item(s) specified — skipping.')
     return
   }
 
@@ -18,13 +18,13 @@ async function dropItems(bot, options) {
     const inv = bot.inventory.items().filter(i => i.name === itemName)
 
     if (inv.length === 0) {
-      console.log(`[ACTION] dropItems: no "${itemName}" in inventory — skipping.`)
+      bot.log.info(`[ACTION] dropItems: no "${itemName}" in inventory — skipping.`)
       continue
     }
 
-    const total = inv.reduce((sum, i) => sum + i.count, 0)
+    const total    = inv.reduce((sum, i) => sum + i.count, 0)
     const dropping = count === -1 ? total : Math.min(count, total)
-    console.log(`[ACTION] dropItems: inventory has ${total} × "${itemName}" — dropping ${dropping}...`)
+    bot.log.info(`[ACTION] dropItems: ${total} × "${itemName}" in inventory — dropping ${dropping}...`)
 
     await skills.discard(bot, itemName, count)
   }

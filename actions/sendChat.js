@@ -4,7 +4,7 @@
 async function sendChat(bot, options) {
   const { message = '', delayAfterMs = 500 } = options
   if (!message) return
-  console.log(`[ACTION] Sending chat: "${message}"`)
+  bot.log.info(`[ACTION] Sending chat: "${message}"`)
   bot.chat(message)
   await new Promise(resolve => setTimeout(resolve, delayAfterMs))
 }
