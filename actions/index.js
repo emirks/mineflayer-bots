@@ -4,6 +4,7 @@ const registry = {
   breakBlock: require('./breakBlock'),
   breakAllBlocks: require('./breakAllBlocks'),
   disconnect: require('./disconnect'),
+  dropItems: require('./dropItems'),
   goToBlock: require('./goToBlock'),
   takeFromChest: require('./takeFromChest'),
   pickupItems: require('./pickupItems'),
