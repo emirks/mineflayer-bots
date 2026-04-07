@@ -9,10 +9,12 @@ function register(bot, options, fire) {
 
   console.log(`[TRIGGER] onSpawn armed — firing in ${delayMs}ms`)
 
-  setTimeout(() => {
+  const timer = setTimeout(() => {
     console.log(`[TRIGGER] onSpawn fired`)
     fire({})
   }, delayMs)
+
+  return { cancel: () => clearTimeout(timer) }
 }
 
 module.exports = register

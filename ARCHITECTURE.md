@@ -149,37 +149,38 @@
 ║ │                  │  exports { bot, skills, viewer, triggers, protocolDebug }  ║
 ║ │                  ▼                                                       │    ║
 ║ │ ┌─────────────────────────────────────────────────────────────────────┐ │    ║
-║ │ │  bot.js  —  ENTRY POINT                                             │ │    ║
+║ │ │  bot.js  —  SINGLE-BOT ENTRY POINT (thin wrapper)                  │ │    ║
 ║ │ │                                                                     │ │    ║
-║ │ │  ① require('./lib/runtimeConfig')                                  │ │    ║
-║ │ │    runtimeConfig.set(profile)    ← MUST happen before anything     │ │    ║
-║ │ │    (skills.js reads blockPlaceDelay at module-load time)           │ │    ║
-║ │ │  ② mineflayer.createBot(botConfig)  → bot                         │ │    ║
-║ │ │  ③ attachProtocolDebug(bot, opts)   → hooks bot._client           │ │    ║
-║ │ │  ④ applyVelocityPatch(bot)          → prependListener fix         │ │    ║
-║ │ │  ⑤ bot.output='' · bot.modes=stubs → mindcraft compat shims       │ │    ║
-║ │ │  ⑥ mc.init(bot)                     → loads pathfinder+collectblock│ │    ║
-║ │ │  ⑦ bot.on('login')  log connected                                  │ │    ║
-║ │ │    bot.on('error')  log error                                       │ │    ║
-║ │ │    bot.on('kicked') formatKickReason → process.exit(1)             │ │    ║
-║ │ │    bot.on('end')    process.exit(0)                                 │ │    ║
-║ │ │    bot.on('spawn')  → mineflayerViewer(bot) if viewer.enabled      │ │    ║
-║ │ │                     → registerTrigger(bot, cfg) per trigger        │ │    ║
+║ │ │  createBotSession(profileName)  → { bot, promise }                 │ │    ║
+║ │ │  promise.then  → process.exit(0)                                   │ │    ║
+║ │ │  promise.catch → process.exit(1)                                   │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  All session logic lives in lib/createBotSession.js               │ │    ║
+║ │ │  For multi-bot + auto-reconnect: use orchestrator.js              │ │    ║
 ║ │ └─────────────────────────────────────────────────────────────────────┘ │    ║
 ║ │                  │  fires triggers at spawn                              │    ║
 ║ │                  ▼                                                       │    ║
 ║ │ ┌─────────────────────────────────────────────────────────────────────┐ │    ║
 ║ │ │  triggers/  ──────────────────────────────────────────────────────  │ │    ║
 ║ │ │                                                                     │ │    ║
-║ │ │  index.js   registry: { playerRadius, blockNearby, onSpawn }       │ │    ║
-║ │ │             let actionChain = Promise.resolve()  ← global queue   │ │    ║
+║ │ │  index.js   exports createTriggerRegistry() — called once per      │ │    ║
+║ │ │             bot session; returns { registerTrigger, stopAll }      │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │             registry: { playerRadius, blockNearby, onSpawn }       │ │    ║
+║ │ │             let running=false; queue=[]  ← per-session state       │ │    ║
+║ │ │             let cleanups=[]  ← cancel() handles from handlers      │ │    ║
+║ │ │                                                                     │ │    ║
 ║ │ │             registerTrigger(bot, cfg):                              │ │    ║
+║ │ │               priority = cfg.priority ?? 0                         │ │    ║
 ║ │ │               fire = (ctx) => {                                     │ │    ║
 ║ │ │                 if (bot._quitting) return                           │ │    ║
-║ │ │                 actionChain = actionChain                           │ │    ║
-║ │ │                   .then(() => executeActions(bot,cfg.actions,ctx)) │ │    ║
-║ │ │               }  ← serialises execution; sensing stays parallel    │ │    ║
-║ │ │               registry[cfg.type](bot, cfg.options, fire)            │ │    ║
+║ │ │                 push { priority, fn: executeActions(ctx) }          │ │    ║
+║ │ │                 flush()  ← sorts by priority, drains one at a time │ │    ║
+║ │ │               }  ← sensing stays parallel; execution is serialised │ │    ║
+║ │ │               cleanup = registry[cfg.type](bot, cfg.options, fire) │ │    ║
+║ │ │               if cleanup?.cancel → cleanups.push(cancel)           │ │    ║
+║ │ │             stopAll() → calls every cleanup.cancel()               │ │    ║
+║ │ │               ← called on session end by createBotSession          │ │    ║
 ║ │ │                                                                     │ │    ║
 ║ │ │  playerRadius.js                                                    │ │    ║
 ║ │ │    slow setInterval (checkIntervalMs)                               │ │    ║
@@ -188,15 +189,20 @@
 ║ │ │        → hit: fire(context) + arm fast panic watch                 │ │    ║
 ║ │ │    fast setInterval (panicIntervalMs, armed after alert)            │ │    ║
 ║ │ │      world.getNearestEntityWhere(bot, pred, panicRadius)            │ │    ║
-║ │ │        → hit: bot.quit()  ← emergency, bypasses action stack       │ │    ║
+║ │ │        → hit: bot._quitting=true · pathfinder.stop() · bot.quit() │ │    ║
+║ │ │             ← emergency, bypasses action queue entirely             │ │    ║
+║ │ │    panicRadius ≤ 0 → guard skips startPanicWatch entirely          │ │    ║
+║ │ │    returns { cancel() { clearInterval(slow+fast) } }               │ │    ║
 ║ │ │                                                                     │ │    ║
 ║ │ │  blockNearby.js                                                     │ │    ║
 ║ │ │    setInterval (checkIntervalMs)                                    │ │    ║
 ║ │ │      world.getNearestBlock(bot, blockName, radius)                  │ │    ║
-║ │ │        → found: fire({ block }) · clearInterval                    │ │    ║
+║ │ │        → found: fire({ block }) · clearInterval · triggered=true   │ │    ║
+║ │ │    returns { cancel() { clearInterval } }                           │ │    ║
 ║ │ │                                                                     │ │    ║
 ║ │ │  onSpawn.js                                                         │ │    ║
 ║ │ │    setTimeout(delayMs) → fire({}) once                              │ │    ║
+║ │ │    returns { cancel() { clearTimeout } }                            │ │    ║
 ║ │ └─────────────────────────────────────────────────────────────────────┘ │    ║
 ║ │                  │  fire() → executeActions()                            │    ║
 ║ │                  ▼                                                       │    ║
@@ -255,11 +261,13 @@
 ║ │ │   getNearestBlock     │ │    bot.placeBlock(block, faceVec)         │ │    ║
 ║ │ │   getNearestBlocks    │ │    bot.inventory.items()                  │ │    ║
 ║ │ │   getNearestFreeSpace │ │    bot.armorManager.equipAll()            │ │    ║
-║ │ │   getBlockAtPosition  │ │    bot.modes.pause() ← stub in bot.js    │ │    ║
+║ │ │   getBlockAtPosition  │ │    bot.modes.pause() ← stub in session   │ │    ║
 ║ │ │   getFirstBlockAbove  │ │  Also uses:                               │ │    ║
 ║ │ │   getNearbyEntities   │ │    world.* · mcdata.* · pf.goals.*       │ │    ║
-║ │ │   getNearestEntity    │ │    Vec3 · runtimeConfig (blockPlaceDelay) │ │    ║
-║ │ │     Where(pred, dist) │ │                                           │ │    ║
+║ │ │   getNearestEntity    │ │    Vec3                                   │ │    ║
+║ │ │     Where(pred, dist) │ │    blockDelay(bot) → reads               │ │    ║
+║ │ │                       │ │      bot._config.skills.blockPlaceDelay  │ │    ║
+║ │ │                       │ │      per-call (not module-level constant) │ │    ║
 ║ │ │   getNearbyPlayers    │ │  Exports:                                 │ │    ║
 ║ │ │   getPosition         │ │    breakBlockAt(bot, x,y,z)               │ │    ║
 ║ │ │   getNearbyBlockTypes │ │    goToPosition(bot, x,y,z, minDist)      │ │    ║
@@ -299,13 +307,109 @@
 ║ │ │   getBlockTool        │  └─────────────────────────────────────────┘  │    ║
 ║ │ │   isSmeltable         │                                               │    ║
 ║ │ │   isHuntable          │  ┌─────────────────────────────────────────┐  │    ║
-║ │ │   isHostile           │  │  lib/runtimeConfig.js                   │  │    ║
+║ │ │   isHostile           │  │  lib/runtimeConfig.js  (LEGACY)         │  │    ║
 ║ │ │   mustCollectManually │  │  Singleton: set(profile) · get()        │  │    ║
-║ │ │   ingredientsFrom     │  │  MUST be set() before skills.js loads   │  │    ║
-║ │ │     PrismarineRecipe  │  │  skills.js reads blockPlaceDelay        │  │    ║
-║ │ │   calculateLimiting   │  │  at module-load time from this          │  │    ║
-║ │ │     Resource          │  └─────────────────────────────────────────┘  │    ║
+║ │ │   ingredientsFrom     │  │  ⚠ No longer used by skills.js or      │  │    ║
+║ │ │     PrismarineRecipe  │  │    createBotSession. Kept in repo for   │  │    ║
+║ │ │   calculateLimiting   │  │    backward compatibility only.         │  │    ║
+║ │ │     Resource          │  │  skills.js now uses blockDelay(bot)     │  │    ║
+║ │ │                       │  │  which reads bot._config per-call.      │  │    ║
+║ │ │                       │  └─────────────────────────────────────────┘  │    ║
 ║ │ └──────────────────────┘                                               │    ║
+║ │                                                                          │    ║
+║ │ ┌─────────────────────────────────────────────────────────────────────┐ │    ║
+║ │ │  lib/createBotSession.js  —  SESSION FACTORY                       │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  createBotSession(profileName) → { bot, promise }                  │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  ① profile = require('../profiles/<name>')                         │ │    ║
+║ │ │  ② bot = mineflayer.createBot(profile.bot)                        │ │    ║
+║ │ │  ③ bot._config = profile   ← per-bot config; no global singleton  │ │    ║
+║ │ │    bot._profileName = profileName                                  │ │    ║
+║ │ │    bot._quitting = false                                           │ │    ║
+║ │ │    bot.output='' · bot.modes=stubs  (mindcraft compat)            │ │    ║
+║ │ │  ④ attachProtocolDebug(bot, mergedOpts)                           │ │    ║
+║ │ │  ⑤ applyVelocityPatch(bot)                                        │ │    ║
+║ │ │  ⑥ mc.init(bot)  → loadPlugin(pathfinder+collectblock)           │ │    ║
+║ │ │  ⑦ { registerTrigger, stopAll } = createTriggerRegistry()        │ │    ║
+║ │ │     ← per-session; isolated queue + cleanup handles               │ │    ║
+║ │ │  ⑧ bot.once('spawn'):                                             │ │    ║
+║ │ │       mineflayerViewer(bot, ...) if viewer.enabled                │ │    ║
+║ │ │       for cfg of profile.triggers: registerTrigger(bot, cfg)      │ │    ║
+║ │ │  ⑨ promise = new Promise((resolve, reject) => {                  │ │    ║
+║ │ │       bot.on('login')  → log                                      │ │    ║
+║ │ │       bot.on('error')  → log (does NOT reject)                   │ │    ║
+║ │ │       bot.on('kicked') → stopAll(); reject({ type:'kicked' })    │ │    ║
+║ │ │       bot.on('end')    → stopAll()                                │ │    ║
+║ │ │                           resolve({ reason, intentional:         │ │    ║
+║ │ │                             bot._quitting })                      │ │    ║
+║ │ │     })                                                            │ │    ║
+║ │ │                                                                   │ │    ║
+║ │ │  Does NOT call process.exit() — caller owns process lifecycle    │ │    ║
+║ │ └─────────────────────────────────────────────────────────────────────┘ │    ║
+║ │                                                                          │    ║
+║ │ ┌─────────────────────────────────────────────────────────────────────┐ │    ║
+║ │ │  lib/BotManager.js  —  PER-PROFILE LIFECYCLE                       │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  extends EventEmitter                                               │ │    ║
+║ │ │  constructor({ profile, reconnect, maxRetries, baseDelayMs })      │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  State machine:                                                     │ │    ║
+║ │ │    IDLE → CONNECTING → CONNECTED → DISCONNECTED                   │ │    ║
+║ │ │             ↑                           ↓                          │ │    ║
+║ │ │             └──────── RECONNECTING ─────┘                          │ │    ║
+║ │ │                              ↓                                     │ │    ║
+║ │ │                     STOPPED (intentional quit or stop() called)    │ │    ║
+║ │ │                     FAILED  (maxRetries exceeded)                  │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  start()  → enters CONNECTING, calls createBotSession in loop     │ │    ║
+║ │ │  stop()   → sets _stopped=true, bot._quitting=true, bot.quit()   │ │    ║
+║ │ │  getSnapshot() → { profile, state, attempt, uptime }              │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  Reconnect logic:                                                  │ │    ║
+║ │ │    intentional=true → STOPPED (no reconnect)                      │ │    ║
+║ │ │    unexpected end / kick → RECONNECTING                           │ │    ║
+║ │ │    delay = min(baseDelayMs × 2^attempt, 60000)                    │ │    ║
+║ │ │    attempt > maxRetries → FAILED                                   │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  Events emitted:                                                   │ │    ║
+║ │ │    'stateChange'   { profile, state, attempt, uptime }             │ │    ║
+║ │ │    'reconnecting'  { profile, attempt, delay }                     │ │    ║
+║ │ │    'error'         { profile, error, attempt }                     │ │    ║
+║ │ └─────────────────────────────────────────────────────────────────────┘ │    ║
+║ │                                                                          │    ║
+║ │ ┌─────────────────────────────────────────────────────────────────────┐ │    ║
+║ │ │  lib/EventBus.js  —  CROSS-BOT EVENT BUS                           │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  Singleton EventEmitter shared across all sessions in the process  │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  Published by orchestrator:                                        │ │    ║
+║ │ │    'bot:stateChange'   { profile, state, attempt, uptime }         │ │    ║
+║ │ │    'bot:error'         { profile, error, attempt }                 │ │    ║
+║ │ │    'bot:reconnecting'  { profile, attempt, delay }                 │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  Future patterns (publish from actions/triggers):                 │ │    ║
+║ │ │    'world:spawnerFound'  { profile, position }                     │ │    ║
+║ │ │    'world:playerSeen'    { profile, username, distance }           │ │    ║
+║ │ │    'trade:cycleComplete' { profile, items }                        │ │    ║
+║ │ │  → other bots or GUI subscribe and coordinate via EventBus        │ │    ║
+║ │ └─────────────────────────────────────────────────────────────────────┘ │    ║
+║ │                                                                          │    ║
+║ │ ┌─────────────────────────────────────────────────────────────────────┐ │    ║
+║ │ │  orchestrator.js  —  MULTI-BOT ENTRY POINT                         │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  managers = Map<profileName, BotManager>                            │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  spawnBot(config)   → creates BotManager, wires EventBus, starts  │ │    ║
+║ │ │  stopBot(name)      → manager.stop()                               │ │    ║
+║ │ │  getBotStates()     → [ manager.getSnapshot(), ... ]               │ │    ║
+║ │ │                         ← initial data for GUI render              │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  CLI: node orchestrator.js sentinel trader                         │ │    ║
+║ │ │  Module: const { spawnBot, EventBus } = require('./orchestrator')  │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  SIGINT handler → manager.stop() for all → setTimeout 1.5s exit   │ │    ║
+║ │ └─────────────────────────────────────────────────────────────────────┘ │    ║
 ║ │                                                                          │    ║
 ║ └──────────────────────────────────────────────────────────────────────────┘    ║
 ║                                                                                  ║
@@ -342,47 +446,74 @@
 
 ## 2 · Boot Sequence (ordered)
 
+### Path A — Single bot: `node bot.js sentinel`
+
 ```
 node bot.js sentinel
   │
-  ├─ require('./lib/runtimeConfig')           [singleton created, _active = {}]
-  ├─ require('./profiles/sentinel')           [spreads _base, returns full config]
-  ├─ runtimeConfig.set(profile)              [_active = profile]
+  ├─ createBotSession('sentinel')             [lib/createBotSession.js]
+  │    ├─ profile = require('./profiles/sentinel')   [spreads _base]
+  │    ├─ bot = mineflayer.createBot(profile.bot)
+  │    │    └─ minecraft-protocol.createClient()    [TCP → handshake → login]
+  │    │         └─ Microsoft auth flow             [device-code / token cache]
+  │    ├─ bot._config = profile               [per-session; no global singleton]
+  │    ├─ bot._profileName = 'sentinel'
+  │    ├─ bot._quitting = false
+  │    ├─ bot.output='' · bot.modes=stubs    [mindcraft compat shims]
+  │    ├─ attachProtocolDebug(bot, mergedOpts)
+  │    ├─ applyVelocityPatch(bot)             [prependListener on entity_velocity + spawn_entity]
+  │    ├─ mc.init(bot)
+  │    │    ├─ bot.loadPlugin(pathfinder)     [adds bot.pathfinder.*]
+  │    │    ├─ bot.loadPlugin(collectblock)   [adds bot.collectBlock.*]
+  │    │    └─ bot.once('login'):
+  │    │         mc_version = bot.version
+  │    │         mcdata = minecraftData(mc_version)
+  │    │         Item   = prismarine_items(mc_version)
+  │    ├─ { registerTrigger, stopAll } = createTriggerRegistry()
+  │    │    ← isolated per-session; own priority queue + cleanups array
+  │    ├─ bot.once('spawn'):                  ← once() prevents re-registration on /warp
+  │    │    ├─ (opt) mineflayerViewer(bot, { port, firstPerson })
+  │    │    └─ for cfg of profile.triggers:
+  │    │         cleanup = registry[cfg.type](bot, cfg.options, fire)
+  │    │         if cleanup?.cancel → cleanups.push(cancel)
+  │    └─ promise settled by:
+  │         bot.on('login')  → log
+  │         bot.on('error')  → log (non-fatal)
+  │         bot.on('kicked') → stopAll() → reject({ type:'kicked', ... })
+  │         bot.on('end')    → stopAll() → resolve({ reason, intentional })
   │
-  ├─ require('mineflayer')                   [loads 42 internal plugins]
-  ├─ require('./triggers')                   [registry built]
-  ├─ require('./lib/mcdata')                 [module-level: nothing yet]
-  ├─ require('./lib/protocolDebug')          [module-level: nothing yet]
-  ├─ require('./lib/velocityPatch')          [module-level: nothing yet]
-  ├─ require('./lib/skills')  ← (transitive) [blockPlaceDelay read from runtimeConfig NOW]
+  └─ promise.then  → process.exit(0)
+     promise.catch → process.exit(1)
+```
+
+### Path B — Multi-bot: `node orchestrator.js sentinel trader`
+
+```
+node orchestrator.js sentinel trader
   │
-  ├─ mineflayer.createBot(botConfig)
-  │    └─ minecraft-protocol.createClient()  [TCP connect → handshake → login]
-  │         └─ Microsoft auth flow           [device-code / token cache]
+  ├─ for each profileName in argv:
+  │    spawnBot({ profile: profileName, reconnect:true, maxRetries:10 })
+  │      └─ manager = new BotManager(config)
+  │           manager.on('stateChange')  → EventBus.emit('bot:stateChange', ...)
+  │           manager.on('error')        → EventBus.emit('bot:error', ...)
+  │           manager.on('reconnecting') → EventBus.emit('bot:reconnecting', ...)
+  │           managers.set(profileName, manager)
+  │           manager.start()
+  │             └─ _run():   [async loop]
+  │                  ① setState(CONNECTING)
+  │                  ② { bot, promise } = createBotSession(profileName)
+  │                     [same as Path A: patches, plugins, registry, triggers]
+  │                  ③ bot.on('login') → setState(CONNECTED), reset attempt
+  │                  ④ await promise
+  │                  ⑤ on resolve({ intentional:true }) → setState(STOPPED), break
+  │                     on resolve({ intentional:false }) → setState(DISCONNECTED)
+  │                     on reject (kick) → setState(DISCONNECTED)
+  │                  ⑥ if !_stopped → setState(RECONNECTING)
+  │                       delay = min(baseDelayMs × 2^attempt, 60000)
+  │                       attempt > maxRetries → setState(FAILED), break
+  │                       await sleep(delay) → loop back to ①
   │
-  ├─ attachProtocolDebug(bot, opts)          [hooks bot._client if enabled]
-  ├─ applyVelocityPatch(bot)                 [prependListener on entity_velocity + spawn_entity]
-  ├─ bot.output = ''                         [mindcraft compat stub]
-  ├─ bot.modes = { isOn, pause, unpause }    [mindcraft compat stub]
-  ├─ mc.init(bot)
-  │    ├─ bot.loadPlugin(pathfinder)         [adds bot.pathfinder.*]
-  │    ├─ bot.loadPlugin(collectblock)       [adds bot.collectBlock.*]
-  │    └─ bot.once('login'):
-  │         mc_version = bot.version
-  │         mcdata = minecraftData(mc_version)
-  │         Item   = prismarine_items(mc_version)
-  │
-  ├─ bot.on('login')   → log connected
-  ├─ bot.on('error')   → log error
-  ├─ bot.on('kicked')  → formatKickReason → process.exit(1)
-  ├─ bot.on('end')     → process.exit(0)
-  │
-  └─ bot.once('spawn')          ← once(), not on() — prevents re-registration
-       ├─ (optional) mineflayerViewer(bot, { port, firstPerson })         on dimension change
-       └─ for cfg of profile.triggers:
-            registerTrigger(bot, cfg)
-              ├─ fire = (ctx) => actionChain.then(executeActions(bot,cfg.actions,ctx))
-              └─ registry[cfg.type](bot, cfg.options, fire)
+  └─ SIGINT → all managers.stop() → setTimeout 1500ms → process.exit(0)
 ```
 
 ---
@@ -390,31 +521,47 @@ node bot.js sentinel
 ## 3 · Trigger → Action Data Flow
 
 ```
-                     ┌─────────────────────────────────────────┐
-profile.triggers[n]  │  type: 'playerRadius'                   │
-                     │  options: { alertRadius:3, ... }        │
-                     │  actions: [ {type:'breakAllBlocks',...}, │
-                     │             {type:'disconnect'} ]       │
-                     └──────────────┬──────────────────────────┘
-                                    │ registerTrigger(bot, cfg)
-                                    ▼
-                     triggers/playerRadius.js
-                       setInterval → world.getNearestEntityWhere()
-                       → match! → fire(context)
-                                    │
-                                    ▼
-                     triggers/index.js  fire(context)
-                       actionChain.then(executeActions(bot, cfg.actions, context))
-                                    │         ← queued; previous chain must finish
-                              for...of  (sequential await)
-                              bot._quitting check per step
-                                    │
-                       ┌────────────┴────────────┐
-                       ▼                         ▼
-              breakAllBlocks               disconnect
-              world.getNearestBlocks()    bot.quit()
-              skills.goToPosition()
-              skills.breakBlockAt()
+                     ┌─────────────────────────────────────────────────────────┐
+profile.triggers[n]  │  type: 'playerRadius'                                   │
+                     │  priority: 10  (optional; higher = runs first in queue)  │
+                     │  options: { alertRadius:3, ... }                         │
+                     │  actions: [ {type:'breakAllBlocks', options:{timeoutMs:300000}},│
+                     │             {type:'disconnect'} ]                        │
+                     └────────────────────┬────────────────────────────────────┘
+                                          │ registerTrigger(bot, cfg)
+                                          ▼
+                          triggers/playerRadius.js        triggers/blockNearby.js
+                          triggers/onSpawn.js             [all run in PARALLEL — sensing]
+                          setInterval / setTimeout
+                          world.getNearestEntityWhere()
+                          → match! → fire(context)
+                                          │
+                                          ▼
+                     triggers/index.js  fire(context)     [per-session createTriggerRegistry()]
+                       push { priority, fn: ()=>executeActions(bot, cfg.actions, context) }
+                       queue.sort((a,b) => b.priority - a.priority)
+                       flush():  if running → return (will drain after current finishes)
+                                 running=true; dequeue head; await fn(); running=false
+                                 ← action chains SERIALISED; highest priority runs next
+                                 ← active chain is NEVER preempted (runs to completion)
+                              for...of  (sequential await inside executeActions)
+                              bot._quitting check per step  ← aborts chain on quit
+                              opts.timeoutMs → Promise.race([run, timeout])
+                              try/catch per action → logs warn, continues to next
+                                          │
+                       ┌──────────────────┴──────────────────┐
+                       ▼                                     ▼
+              breakAllBlocks                           disconnect
+              world.getNearestBlocks()                 bot._quitting = true
+              skills.goToPosition()                    bot.pathfinder.stop()
+              skills.breakBlockAt()                    bot.quit()
+              [timeoutMs: 300000 caps entire loop]
+
+  ─────────────────────────────────────────────────────────────────────────────
+  EMERGENCY PATH (panic — bypasses queue entirely):
+    playerRadius.js fast interval → bot._quitting=true · pathfinder.stop() · bot.quit()
+    ← direct call; does not wait for any running or queued action to finish
+  ─────────────────────────────────────────────────────────────────────────────
 ```
 
 ---
@@ -495,7 +642,7 @@ vec3i16 scale:  raw_i16 ÷ 8000 = blocks/tick
 
 | Package | Version | Role | Who loads it |
 |---------|---------|------|-------------|
-| `mineflayer` | 4.37.0 | Minecraft client — bot API, 42 internal plugins, physics | `bot.js` |
+| `mineflayer` | 4.37.0 | Minecraft client — bot API, 42 internal plugins, physics | `lib/createBotSession.js` |
 | `minecraft-protocol` | 1.66.0 | Raw TCP: framing, encryption, compression, protodef codec | mineflayer (transitive) |
 | `minecraft-data` | 3.109.0 | Version-specific block/item/entity/packet schemas | mcdata.js + mineflayer + mc-protocol |
 | `mineflayer-pathfinder` | 2.4.5 | A* pathfinding, adds `bot.pathfinder.*` | `mc.init` via `bot.loadPlugin` |
@@ -515,7 +662,8 @@ vec3i16 scale:  raw_i16 ÷ 8000 = blocks/tick
 | `debug` | 3002 | `onSpawn` | Send `/skyblock` then print all nearby blocks + entities every 5 s |
 | `trader` | 3001 | `onSpawn` + `blockNearby` + `playerRadius` | Warp to market → loot chest → sell → pick up drops; panic-disconnect on player |
 
-Run with: `node bot.js sentinel` | `node bot.js debug` | `node bot.js trader`
+Single bot:  `node bot.js sentinel` | `node bot.js debug` | `node bot.js trader`
+Multi-bot:   `node orchestrator.js sentinel trader`  (auto-reconnect, shared EventBus)
 
 ---
 
@@ -524,20 +672,130 @@ Run with: `node bot.js sentinel` | `node bot.js debug` | `node bot.js trader`
 ### New Action
 1. `actions/myAction.js` → `async function myAction(bot, options, context) {}; module.exports = myAction`
    - `context` carries trigger data (e.g. `context.block`, `context.username`) — use or ignore as needed.
-   - Add `timeoutMs` to the action's `options` in a profile to abort the step after N ms.
+   - Read per-bot config via `bot._config` if you need profile settings.
+   - Add `timeoutMs` to the action's `options` in a profile to abort the step after N ms via `Promise.race`.
 2. Add `myAction: require('./myAction')` to registry in `actions/index.js`
-3. Use `{ type: 'myAction', options: { … } }` in a profile's `actions` array
+3. Use `{ type: 'myAction', options: { timeoutMs: 30000, … } }` in a profile's `actions` array
 
 ### New Trigger
-1. `triggers/myTrigger.js` → `function register(bot, options, fire) {}; module.exports = register`
+1. `triggers/myTrigger.js`:
+   ```js
+   function register(bot, options, fire) {
+     const interval = setInterval(() => {
+       if (someCondition) fire({ key: value })
+     }, options.checkIntervalMs ?? 1000)
+     return { cancel() { clearInterval(interval) } }  // ← required for session cleanup
+   }
+   module.exports = register
+   ```
 2. Add `myTrigger: require('./myTrigger')` to registry in `triggers/index.js`
-3. Use `{ type: 'myTrigger', options: { … }, actions: [ … ] }` in a profile
+3. In a profile: `{ type: 'myTrigger', priority: 5, options: { … }, actions: [ … ] }`
+   - `priority` (number, optional, default 0): higher priority trigger chains run first
+     among queued chains. Active chains run to completion before the next starts.
 
 ### New Profile
 1. `profiles/myProfile.js` → spread `_base`, override what you need
-2. Run: `node bot.js myProfile`
+2. Single bot: `node bot.js myProfile`
+3. Multi-bot with reconnect: `node orchestrator.js myProfile sentinel`
+
+### Cross-bot coordination via EventBus
+```js
+const EventBus = require('./lib/EventBus')
+// In an action or trigger:
+EventBus.emit('world:spawnerFound', { profile: bot._profileName, position: block.position })
+// In orchestrator or a future GUI server:
+EventBus.on('world:spawnerFound', ({ profile, position }) => { /* dispatch another bot */ })
+```
 
 ### Important conventions
-- Always use `world.*` or `skills.*` from `lib/` — never call mineflayer API directly from a trigger or action unless the API is trivial (`bot.chat`, `bot.quit`, `bot.setControlState`).
-- Never `require('./lib/skills')` at top level before `runtimeConfig.set()` has run in `bot.js`.
+- Always use `world.*` or `skills.*` from `lib/` — never call mineflayer API directly from a
+  trigger or action unless the API is trivial (`bot.chat`, `bot.quit`, `bot.setControlState`).
+- Read per-bot config from `bot._config` — do not use `runtimeConfig.get()`.
+- Every trigger handler must return `{ cancel() { … } }` so `stopAll()` can clean up on session end.
 - Package manager is **pnpm** — do not mix with `npm install`.
+- Use `node` to run scripts (`node bot.js`, `node orchestrator.js`) — pnpm is for package management only.
+
+---
+
+## 9 · Orchestration Layer — Detail
+
+### Isolation guarantees
+
+Each `createBotSession()` call produces a fully independent session:
+
+| Resource | Isolation mechanism |
+|----------|---------------------|
+| mineflayer bot object | new `mineflayer.createBot()` per session |
+| Profile config | `bot._config = profile` (no global singleton) |
+| Action queue | `createTriggerRegistry()` returns a new queue per call |
+| Trigger cleanup handles | `cleanups[]` array scoped to the factory closure |
+| Process lifecycle | `promise` resolves/rejects; caller decides exit |
+| `blockPlaceDelay` | `blockDelay(bot)` reads `bot._config` per-call |
+
+### BotManager state transitions
+
+```
+              ┌──────────┐
+  start() ──► │ CONNECTING│
+              └─────┬────┘
+                    │  login event
+                    ▼
+              ┌─────────┐
+              │CONNECTED │  ◄── uptime timer starts
+              └─────┬────┘
+                    │  end / kick
+                    ▼
+              ┌────────────┐
+              │DISCONNECTED│
+              └─────┬──────┘
+                    │
+         ┌──────────┤
+         │intentional│  stop() was called or bot._quitting=true at session end
+         ▼          │
+     ┌─────────┐    │  unexpected
+     │ STOPPED │    ▼
+     └─────────┘  ┌─────────────┐
+                  │RECONNECTING │  delay = min(base × 2^attempt, 60 000 ms)
+                  └──────┬──────┘
+                         │
+              ┌──────────┤
+              │attempt > maxRetries
+              ▼          │
+          ┌────────┐     │ retry
+          │ FAILED │     └──► CONNECTING
+          └────────┘
+```
+
+### EventBus event catalogue
+
+| Event name | Payload | Published by |
+|------------|---------|--------------|
+| `bot:stateChange` | `{ profile, state, attempt, uptime }` | orchestrator (forwards BotManager) |
+| `bot:error` | `{ profile, error, attempt }` | orchestrator (forwards BotManager) |
+| `bot:reconnecting` | `{ profile, attempt, delay }` | orchestrator (forwards BotManager) |
+
+Future events (publish from actions/triggers, subscribe in orchestrator or GUI server):
+
+| Event name | Payload | Intent |
+|------------|---------|--------|
+| `world:spawnerFound` | `{ profile, position }` | Notify another bot to assist |
+| `world:playerSeen` | `{ profile, username, distance }` | Alert other bots |
+| `trade:cycleComplete` | `{ profile, items, profit }` | Trigger re-supply bot |
+| `inventory:full` | `{ profile }` | Dispatch carrier bot |
+
+### Future GUI integration pattern
+
+```
+HTTP / WebSocket server (future)
+  │
+  ├─ GET  /bots        → orchestrator.getBotStates()        [initial render]
+  ├─ POST /bots/:name/start  → orchestrator.spawnBot(cfg)
+  ├─ POST /bots/:name/stop   → orchestrator.stopBot(name)
+  │
+  └─ WebSocket push ← EventBus.on('bot:stateChange', send)
+                    ← EventBus.on('bot:error', send)
+                    ← EventBus.on('world:*', send)   [game events]
+```
+
+The GUI server simply `require('./orchestrator')` and subscribes to `EventBus`. No changes
+to bot sessions, BotManager, or profiles are needed when the GUI is added.

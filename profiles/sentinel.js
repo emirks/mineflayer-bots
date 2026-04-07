@@ -14,7 +14,7 @@ module.exports = {
       type: 'playerRadius',
       options: {
         printRadius: 500000,   // log [DIST] for every player within this range
-        alertRadius: 3,    // fire action stack + arm panic watch
+        alertRadius: 2,    // fire action stack + arm panic watch
         panicRadius: 0,    // emergency bot.quit() — ignores running actions
         checkIntervalMs: 500,  // slow scan rate (print + alert)
         panicIntervalMs: 100,  // fast scan rate after alert fires

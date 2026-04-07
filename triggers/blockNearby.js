@@ -29,6 +29,8 @@ function register(bot, options, fire) {
       fire({ block })
     }
   }, checkIntervalMs)
+
+  return { cancel: () => clearInterval(interval) }
 }
 
 module.exports = register

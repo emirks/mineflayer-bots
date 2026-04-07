@@ -8,57 +8,110 @@ const registry = {
   onSpawn: require('./onSpawn'),
 }
 
-// ─── Global action chain queue ────────────────────────────────────────────────
-// All action stacks are serialized through this single promise chain.
+// ─── createTriggerRegistry ────────────────────────────────────────────────────
+// Factory: creates one isolated trigger registry for a single bot session.
+// Call this once per session; do NOT share registries across sessions.
 //
-// WHY: triggers (sensing) run in parallel — that is correct and intentional.
-// But mineflayer's pathfinder, dig, and openChest are single-instance; if two
-// triggers fire close together and both start executeActions concurrently, one
-// chain will silently cancel the other's pathfinder goal and corrupt shared bot
-// state.  Serializing *execution* (not sensing) prevents that while keeping all
-// polling intervals fully concurrent.
+// Returns { registerTrigger, stopAll }
+//   registerTrigger(bot, triggerConfig) — sets up one trigger's polling + fire()
+//   stopAll()                           — cancels all polling intervals/timeouts
 //
-// HOW: each fire() call appends its chain as a .then() on the current tail.
-// The queue is self-managing — no locks or mutexes needed.
+// ── Concurrency model ─────────────────────────────────────────────────────────
+//   Trigger polling  → fully parallel  (independent setIntervals — unchanged)
+//   Action execution → serialised through a priority queue
 //
-// PANIC EXCEPTION: playerRadius calls bot.quit() directly, bypassing this queue.
-// That is intentional — emergency disconnect must be instant.
-let actionChain = Promise.resolve()
+// ── Priority queue ────────────────────────────────────────────────────────────
+//   Add `priority: <number>` to a trigger config (default 0).
+//   Higher values run before lower values among *queued* (not yet started) chains.
+//   A CURRENTLY-RUNNING chain is NEVER preempted.
+//   For genuine emergency interruption, use the panic path (direct bot.quit()).
+//
+//   Example: safety trigger runs before routine farming trigger
+//     { type: 'playerRadius', priority: 10, options: {...}, actions: [...] }
+//     { type: 'blockNearby',  priority: 0,  options: {...}, actions: [...] }
+//
+//   Array.sort is stable in Node.js 12+ (V8 TimSort) so equal-priority items
+//   remain in FIFO insertion order.
+//
+// ── Cleanup handles ───────────────────────────────────────────────────────────
+//   Each trigger handler may return { cancel() } to clean up its interval/timer.
+//   stopAll() calls every registered cancel() — required for clean session teardown
+//   in multi-bot mode where sessions end without process.exit().
 
-// Resolves a trigger config, builds the fire() callback that runs its action
-// stack, and hands both to the trigger handler.
-function registerTrigger(bot, triggerConfig) {
-  const handler = registry[triggerConfig.type]
+function createTriggerRegistry() {
+  let running = false
+  const queue = []    // { priority, label, fn }
+  const cleanups = [] // cancel() functions returned by trigger handlers
 
-  if (!handler) {
-    console.warn(`[TRIGGER] Unknown trigger type "${triggerConfig.type}" — skipping.`)
-    return
+  // Drains the queue, highest-priority first, one chain at a time.
+  async function flush() {
+    if (running) return
+    running = true
+
+    while (queue.length > 0) {
+      // Re-sort before each dequeue so a high-priority item enqueued WHILE the
+      // previous chain was running still runs before lower-priority waiting items.
+      queue.sort((a, b) => b.priority - a.priority)
+      const task = queue.shift()
+      await task.fn()
+    }
+
+    running = false
   }
 
-  const label = triggerConfig.type
+  function registerTrigger(bot, triggerConfig) {
+    const handler = registry[triggerConfig.type]
 
-  // fire() is the bridge between a trigger and its action stack.
-  // The trigger calls fire(context) and knows nothing about what actions run.
-  // context carries trigger-specific data (e.g. { username, distance } from
-  // playerRadius, { block } from blockNearby) so actions can use it directly
-  // instead of re-querying the world.
-  const fire = (context = {}) => {
-    if (bot._quitting) return Promise.resolve()
+    if (!handler) {
+      console.warn(`[TRIGGER] Unknown trigger type "${triggerConfig.type}" — skipping.`)
+      return
+    }
 
-    console.log(`[TRIGGER] "${label}" queuing action chain`)
+    const label = triggerConfig.type
+    const priority = triggerConfig.priority ?? 0
 
-    actionChain = actionChain.then(() => {
-      if (bot._quitting) return
-      return executeActions(bot, triggerConfig.actions, context).catch((err) =>
-        console.error(`[TRIGGER] "${label}" action chain error — ${err.message}`)
-      )
-    })
+    // fire() is the bridge between a trigger and its action stack.
+    // The trigger calls fire(context) — it knows nothing about what runs.
+    // context carries trigger-specific data so actions can use it directly.
+    const fire = (context = {}) => {
+      if (bot._quitting) return Promise.resolve()
 
-    return actionChain
+      console.log(`[TRIGGER] "${label}" queuing action chain (priority ${priority})`)
+
+      // Each fire() returns a Promise that resolves when THIS chain finishes
+      // (after waiting its turn in the queue).
+      return new Promise((resolve) => {
+        queue.push({
+          priority,
+          label,
+          fn: async () => {
+            if (bot._quitting) { resolve(); return }
+            await executeActions(bot, triggerConfig.actions, context).catch((err) =>
+              console.error(`[TRIGGER] "${label}" action chain error — ${err.message}`)
+            )
+            resolve()
+          },
+        })
+        flush().catch((err) =>
+          console.error('[TRIGGER] Queue flush error —', err.message)
+        )
+      })
+    }
+
+    // handler() may return { cancel() } to clean up its interval/timer on session end
+    const cleanup = handler(bot, triggerConfig.options || {}, fire)
+    if (cleanup?.cancel) cleanups.push(cleanup.cancel)
+
+    console.log(`[TRIGGER] Registered "${label}" (priority ${priority})`)
   }
 
-  handler(bot, triggerConfig.options || {}, fire)
-  console.log(`[TRIGGER] Registered "${triggerConfig.type}"`)
+  function stopAll() {
+    for (const fn of cleanups) {
+      try { fn() } catch { /* interval already cleared */ }
+    }
+  }
+
+  return { registerTrigger, stopAll }
 }
 
-module.exports = { registerTrigger }
+module.exports = { createTriggerRegistry }

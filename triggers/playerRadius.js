@@ -26,6 +26,8 @@ function register(bot, options, fire) {
 
   let alerted = false
   let panicked = false
+  // Hoisted so cancel() can clear it even if startPanicWatch() was called.
+  let fastInterval = null
 
   // ── Slow interval: distance logging + alert check ──────────────────────────
   const slowInterval = setInterval(() => {
@@ -78,7 +80,7 @@ function register(bot, options, fire) {
       return
     }
 
-    const fastInterval = setInterval(() => {
+    fastInterval = setInterval(() => {
       if (panicked || !bot.entity) return
 
       const closest = world.getNearestEntityWhere(
@@ -108,6 +110,15 @@ function register(bot, options, fire) {
         bot.quit()
       }
     }, panicIntervalMs)
+  }
+
+  // Return cancel handles so createTriggerRegistry can stop all polling on
+  // session end (required for clean teardown in multi-bot / reconnect mode).
+  return {
+    cancel() {
+      clearInterval(slowInterval)
+      if (fastInterval) clearInterval(fastInterval)
+    },
   }
 }
 

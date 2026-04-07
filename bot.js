@@ -1,91 +1,36 @@
-// ─── Profile selection ────────────────────────────────────────────────────────
-// Usage:  node bot.js <profile>
-// Example: node bot.js sentinel | node bot.js trader | node bot.js debug
+// ─── Single-bot entry point ───────────────────────────────────────────────────
+// Convenience wrapper for running one bot profile directly.
 //
-// IMPORTANT: runtimeConfig must be set before any other require so that
-// lib/skills.js reads the correct blockPlaceDelay when it is first loaded.
-const runtimeConfig = require('./lib/runtimeConfig')
+// Usage:  node bot.js <profile>
+// Example: node bot.js sentinel | debug | trader
+//
+// For multi-bot orchestration (run multiple profiles with auto-reconnect):
+//   node orchestrator.js sentinel trader
+//
+// This file is intentionally minimal — all session logic lives in
+// lib/createBotSession.js so it can be reused by the orchestrator.
+
+const { createBotSession } = require('./lib/createBotSession')
 
 const profileName = process.argv[2] || 'sentinel'
-let profile
+
+let sessionResult
+
 try {
-  profile = require(`./profiles/${profileName}`)
-} catch {
-  console.error(`[ERROR] Unknown profile "${profileName}". Available: sentinel, trader, debug`)
+  sessionResult = createBotSession(profileName)
+} catch (err) {
+  console.error(`[ERROR] ${err.message}`)
   process.exit(1)
 }
 
-runtimeConfig.set(profile)
-console.log(`[BOOT] Loading profile "${profileName}"`)
+const { promise } = sessionResult
 
-// ─── Remaining requires (skills.js is loaded transitively here) ───────────────
-const mineflayer = require('mineflayer')
-const { registerTrigger } = require('./triggers')
-const mc = require('./lib/mcdata')
-const { attachProtocolDebug, formatKickReason } = require('./lib/protocolDebug')
-const { applyVelocityPatch } = require('./lib/velocityPatch')
-
-const { bot: botConfig, viewer: viewerConfig, triggers, protocolDebug } = profile
-
-// ─── Bot ──────────────────────────────────────────────────────────────────────
-const bot = mineflayer.createBot(botConfig)
-
-const protocolDebugMerged = {
-  ...(protocolDebug || {}),
-  ...(process.env.MC_PROTOCOL_DEBUG === '1' || process.env.MC_PROTOCOL_DEBUG === 'true'
-    ? { enabled: true }
-    : {}),
-}
-attachProtocolDebug(bot, protocolDebugMerged)
-applyVelocityPatch(bot)
-
-// Stubs for mindcraft-specific bot properties used inside lib/skills.js
-bot.output = ''
-bot.modes = { isOn: () => false, pause: () => { }, unpause: () => { } }
-
-// Load pathfinder + collectblock plugins and initialise minecraft-data lookups
-mc.init(bot)
-
-// ─── Connection events ────────────────────────────────────────────────────────
-bot.on('login', () => {
-  console.log(`[LOGIN] Connected to ${botConfig.host}:${botConfig.port} as "${bot.username}"`)
-})
-
-bot.on('error', (err) => {
-  console.error('[ERROR]', err.message)
-})
-
-bot.on('kicked', (reason) => {
-  console.warn('[KICKED]', formatKickReason(reason))
-  process.exit(1)
-})
-
-bot.on('end', (reason) => {
-  console.log('[END] Connection closed —', reason)
-  process.exit(0)
-})
-
-// ─── Spawn ────────────────────────────────────────────────────────────────────
-// Use once() — mineflayer re-emits 'spawn' on every dimension change (respawn
-// packet from the server, e.g. /warp or /skyblock crossing a world boundary).
-// Registering triggers more than once would create duplicate intervals and fire
-// action stacks multiple times.
-bot.once('spawn', () => {
-  console.log('[SPAWN] Bot is in the world\n')
-
-  // ── Optional viewer ────────────────────────────────────────────────────────
-  if (viewerConfig.enabled) {
-    const { mineflayer: mineflayerViewer } = require('prismarine-viewer')
-    mineflayerViewer(bot, {
-      port: viewerConfig.port,
-      firstPerson: viewerConfig.firstPerson,
-    })
-    console.log(`[VIEWER] Open http://localhost:${viewerConfig.port} in your browser\n`)
-  }
-
-  // ── Triggers ───────────────────────────────────────────────────────────────
-  console.log('[BOOT] Registering triggers...')
-  for (const triggerConfig of triggers) {
-    registerTrigger(bot, triggerConfig)
-  }
-})
+promise
+  .then(({ reason }) => {
+    console.log(`[BOT] Session ended — ${reason}`)
+    process.exit(0)
+  })
+  .catch((err) => {
+    console.error(`[BOT] Session failed — ${err.message}`)
+    process.exit(1)
+  })

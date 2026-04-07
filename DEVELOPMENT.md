@@ -1,15 +1,17 @@
 To-Do's and features to add:
+
 - [ ] A good logging system
-    [] Log in-game messages
-    [] Log everything that our bot sees (relative ones) like the blocks nearby, people nearby, its coordinates, other bots coordinates, inventory state health state, 
+  - [ ] Log in-game messages
+  - [ ] Log everything that our bot sees (relative): blocks nearby, people nearby, coordinates, other bots' coordinates, inventory, health, …
+  - [ ] Save to a logfile
 
-[] Multi-bot system
-    [] Inter-bot communication or orchestration?: Needed for, for example if we put 2 bots in a single base, they should be responsible from breaking a different complementary set of spawners. Or one bot detecting an intruder should immediately warn the other?
+- [ ] Multi-bot system
+  - [ ] Inter-bot communication or orchestration (e.g. complementary spawner sets; intruder warns other bot)
 
-[] In sentinel mode make it first define the base, and then make the bot functioning normally if near base, if not just freeze the actions etc. Because every day they make maintenance and gather players to a place!
+- [ ] Sentinel: define base first; normal behavior near base, freeze actions away from base (maintenance / player gathers)
 
-[] As an advanced feature, I want structure snapshot and auto build functionalities. Like it will snapshot some place, and auto build it after that! 
-    [] Reserach the building sketches & schemas for this
+- [ ] Advanced: structure snapshot and auto-build
+  - [ ] Research building sketches & schemas
 
 
 Fixes:
@@ -34,4 +36,8 @@ Fixes:
 - [ ] **High** — Add cleanup for `startDebugScan` (no forever leak; debug / mid-stack use).
 - [ ] **High** — Preserve or thread context from `fire()` (stop silent drop / redundant re-scans).
 - [ ] **High** — Per-action timeout for pathfinder-heavy actions (`goToPosition`, `takeFromChest`).
-- [ ] **Medium** — Replace or
+- [ ] **Medium** — Replace or scope `runtimeConfig` singleton for multi-bot-per-process.
+- [ ] **Medium** — Serialize or cancel in-flight action chain on panic quit (sentinel + trader).
+- [ ] **Minor** — Treat `panicRadius: 0` explicitly (document, warn, or fire — not silent never-fire).
+- [ ] **Minor** — Trigger cancel/cleanup API for reconnect and teardown scenarios.
+
