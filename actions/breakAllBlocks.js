@@ -7,10 +7,10 @@ const skills = require('../lib/skills')
 // search comes back empty.  A round cap (default 500) prevents infinite loops.
 async function breakAllBlocks(bot, options) {
   const {
-    blockName       = 'crafting_table',
-    searchRadius    = 64,
-    maxRounds       = 500,
-    rescanDelayMs   = 300,   // wait between re-scan rounds (ms)
+    blockName = 'crafting_table',
+    searchRadius = 64,
+    maxRounds = 500,
+    rescanDelayMs = 300,   // wait between re-scan rounds (ms)
     blockDelayMinMs = 400,   // min random pause between different block positions (ms)
     blockDelayMaxMs = 1600,  // max random pause between different block positions (ms)
   } = options
@@ -43,7 +43,7 @@ async function breakAllBlocks(bot, options) {
       // Navigate upright (no sneak) so we move at full speed between blocks.
       // Stop within 4 blocks so breakBlockAt won't re-navigate and we can be
       // sneaking before the dig starts.
-      await skills.goToPosition(bot, x, y, z, 3)
+      await skills.goToPosition(bot, x, y, z, 4)
 
       bot.setControlState('sneak', true)
       try {
