@@ -8,8 +8,8 @@ const world = require('../lib/world')
 
 function register(bot, options, fire) {
   const {
-    blockName = 'chest',
-    radius = 20,
+    blockName       = 'chest',
+    radius          = 20,
     checkIntervalMs = 1000,
   } = options
 
@@ -24,7 +24,7 @@ function register(bot, options, fire) {
       clearInterval(interval)
 
       const { x, y, z } = block.position
-      console.log(`\n[⚠ ALERT] "${blockName}" found within ${radius} blocks at (${x}, ${y}, ${z})`)
+      bot.log.warn(`[TRIGGER] "${blockName}" found within ${radius} blocks at (${x}, ${y}, ${z})`)
 
       fire({ block })
     }
