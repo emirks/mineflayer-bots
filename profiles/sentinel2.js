@@ -9,17 +9,14 @@ module.exports = {
   ...base,
   bot: {
     ...base.bot,
-    username: 'babapro334233outlook.com',
+    username: 'serhat487-@hotmail.com',
     profilesFolder: './auth-cache/sentinel',
   },
-  viewer: { ...base.viewer, port: 3000 },
+  viewer: { ...base.viewer, port: 3001 },
 
   triggers: [
     {
       type: 'playerRadius',
-      // Only act when within 30 blocks of spawn. Outside base the trigger keeps
-      // sensing (logging [DIST]) but the action chain is silently skipped.
-      baseZone: { radius: 30 },
       options: {
         printRadius: 500000,   // log [DIST] for every player within this range
         alertRadius: 2,    // fire action stack + arm panic watch

@@ -1,16 +1,19 @@
 // ─── Shared base profile ──────────────────────────────────────────────────────
-// All profiles spread this so credentials and defaults live in one place.
-// Override any key in your profile by redeclaring it after the spread.
+// Shared SERVER config and feature defaults.
+// Each profile MUST declare its own bot.username and bot.profilesFolder so that
+// concurrent bots always use different accounts (same account = server blocks
+// the second connection).
+//
+//   bot: { ...base.bot, username: 'account@example.com', profilesFolder: './auth-cache/mybot' }
 
 module.exports = {
-  // ── Bot connection ──────────────────────────────────────────────────────────
+  // ── Shared server / protocol config ────────────────────────────────────────
+  // username and profilesFolder are intentionally absent — set them per-profile.
   bot: {
     host: 'donutsmp.net',
     port: 25565,
-    username: 'babapro334233outlook.com',
     auth: 'microsoft',   // 'offline' | 'microsoft'
-    profilesFolder: './auth-cache',
-    version: '1.20.4',         // false = auto-detect; or pin e.g. '1.21.1'
+    version: '1.20.4',      // false = auto-detect; or pin e.g. '1.21.1'
   },
 
   // ── Skills fine-tuning ──────────────────────────────────────────────────────
@@ -21,7 +24,7 @@ module.exports = {
   // ── Viewer ──────────────────────────────────────────────────────────────────
   // Override `port` in each profile so multiple bots can run side-by-side.
   viewer: {
-    enabled: true,
+    enabled: false,
     port: 3000,
     firstPerson: false,
   },

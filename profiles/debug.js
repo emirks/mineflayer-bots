@@ -6,6 +6,11 @@ const base = require('./_base')
 
 module.exports = {
   ...base,
+  bot: {
+    ...base.bot,
+    username: 'serhat487-@hotmail.com',   // ← set your account; can share sentinel's if not running concurrently
+    profilesFolder: './auth-cache/debug',
+  },
   viewer: { ...base.viewer, port: 3002 },
 
   triggers: [

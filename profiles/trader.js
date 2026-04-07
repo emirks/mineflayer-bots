@@ -13,6 +13,11 @@ const base = require('./_base')
 
 module.exports = {
   ...base,
+  bot: {
+    ...base.bot,
+    username      : '',   // ← must be a different account from sentinel for concurrent use
+    profilesFolder: './auth-cache/trader',
+  },
   viewer: { ...base.viewer, port: 3001 },   // own port — runs alongside sentinel
 
   triggers: [
