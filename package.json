@@ -6,26 +6,46 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "canvas"
-    ]
+    ],
+    "overrides": {
+      "into-stream": "6"
+    }
   },
   "scripts": {
     "start": "node bot.js",
-    "gui":   "node gui/server.js"
+    "gui":   "node gui/server.js",
+    "build": "pkg launch-sentinel.js --targets node18-win-x64 --output dist/sentinel-bot.exe --compress GZip",
+    "postbuild": "node -e \"const fs=require('fs'); fs.copyFileSync('profiles/sentinel.js','dist/sentinel.js'); fs.copyFileSync('profiles/_base.js','dist/_base.js'); console.log('Copied sentinel.js + _base.js to dist/')\""
   },
-  "keywords": [ ],
+  "pkg": {
+    "scripts": [
+      "orchestrator.js",
+      "lib/**/*.js",
+      "triggers/**/*.js",
+      "actions/**/*.js",
+      "profiles/**/*.js"
+    ],
+    "assets": [
+      "node_modules/minecraft-data/data/**"
+    ]
+  },
+  "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "express": "^5.1.0",
-    "socket.io": "^4.8.1",
     "canvas": "^3.2.3",
+    "express": "^5.1.0",
     "minecraft-data": "^3.109.0",
     "mineflayer": "^4.37.0",
     "mineflayer-collectblock": "^1.6.0",
     "mineflayer-pathfinder": "^2.4.5",
     "prismarine-item": "^1.18.0",
     "prismarine-viewer": "^1.33.0",
+    "socket.io": "^4.8.1",
     "vec3": "^0.2.0"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.14.2"
   }
 }
