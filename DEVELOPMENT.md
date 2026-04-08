@@ -22,6 +22,8 @@ To-Do's and features to add:
 
 - [ ] AFK avoidance - random movements etc
 
+- [ ] Don't quit without gatherint N number of Spawners
+
 - [ ] Handle non-intentional disconnection logic like closing viewer
 ### The following error crashesthe orchestrator as a whole!
  health: ? | food: ?
