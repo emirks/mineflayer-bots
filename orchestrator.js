@@ -11,7 +11,8 @@ const EventBus = require('./lib/EventBus')
 //   - Expose a stable programmatic API so a GUI layer never imports bot internals
 //
 // Usage:
-//   CLI:    node orchestrator.js sentinel trader
+//   CLI (interactive):  node orchestrator.js            ← prompts profile picker
+//   CLI (direct):       node orchestrator.js sentinel trader
 //   Module: const { spawnBot, stopBot, getBotStates, EventBus } = require('./orchestrator')
 //
 // EventBus events published here:
@@ -147,30 +148,125 @@ function spawnInstance(instance) {
 
 // ── CLI entry point ───────────────────────────────────────────────────────────
 if (require.main === module) {
-  const profiles = process.argv.slice(2)
+  const fs       = require('fs')
+  const readline = require('readline')
 
-  if (profiles.length === 0) {
-    console.error('Usage:   node orchestrator.js <profile1> [profile2] ...')
-    console.error('Example: node orchestrator.js sentinel')
-    console.error('         node orchestrator.js sentinel trader')
-    process.exit(1)
+  /** Extract the description lines from a profile file's leading comment block. */
+  function readProfileMeta(filePath) {
+    let src
+    try { src = fs.readFileSync(filePath, 'utf8') } catch { return null }
+
+    const lines = src.split('\n')
+    const descLines = []
+    let inBlock = false
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!inBlock && trimmed.startsWith('// ─── Profile:')) {
+        inBlock = true
+        continue  // skip the title line itself
+      }
+      if (inBlock) {
+        if (!trimmed.startsWith('//')) break   // end of leading comment
+        const text = trimmed.replace(/^\/\/\s?/, '').trim()
+        if (text) descLines.push(text)
+      }
+    }
+
+    return descLines.length ? descLines.join('  ') : '(no description)'
   }
 
-  for (const profile of profiles) {
-    spawnBot({
-      profile,
-      reconnect: true,
-      maxRetries: Infinity,
-      baseDelayMs: 5000,
+  /** Scan profiles/ and return [{ name, description }] sorted alphabetically. */
+  function listProfiles() {
+    const dir = path.join(__dirname, 'profiles')
+    return fs.readdirSync(dir)
+      .filter(f => f.endsWith('.js') && !f.startsWith('_'))
+      .sort()
+      .map(f => {
+        const name = path.basename(f, '.js')
+        const desc = readProfileMeta(path.join(dir, f))
+        return { name, desc }
+      })
+  }
+
+  function registerSIGINT() {
+    process.on('SIGINT', () => {
+      console.log('\n[ORCH] SIGINT received — stopping all bots...')
+      for (const manager of managers.values()) manager.stop()
+      setTimeout(() => process.exit(0), 1500)
     })
   }
 
-  // Graceful shutdown on Ctrl+C — stop all bots before exiting
-  process.on('SIGINT', () => {
-    console.log('\n[ORCH] SIGINT received — stopping all bots...')
-    for (const manager of managers.values()) manager.stop()
-    // Give bots a moment to send clean disconnect packets
-    setTimeout(() => process.exit(0), 1500)
+  function startProfiles(chosen) {
+    for (const name of chosen) {
+      spawnBot({ profile: name, reconnect: true, maxRetries: Infinity, baseDelayMs: 5000 })
+    }
+    registerSIGINT()
+  }
+
+  // If profiles are passed directly as argv, skip the interactive prompt
+  const argvProfiles = process.argv.slice(2)
+  if (argvProfiles.length > 0) {
+    startProfiles(argvProfiles)
+    return
+  }
+
+  // ── Interactive profile picker ─────────────────────────────────────────────
+  const available = listProfiles()
+
+  if (available.length === 0) {
+    console.error('[ORCH] No profiles found in profiles/  (expected .js files that are not _base.js)')
+    process.exit(1)
+  }
+
+  const BOLD  = '\x1b[1m'
+  const CYAN  = '\x1b[36m'
+  const DIM   = '\x1b[2m'
+  const RESET = '\x1b[0m'
+
+  console.log(`\n${BOLD}Available profiles:${RESET}\n`)
+  available.forEach(({ name, desc }, i) => {
+    const num   = `${CYAN}[${i + 1}]${RESET}`
+    const label = `${BOLD}${name}${RESET}`
+    console.log(`  ${num} ${label}${DIM}  —  ${desc}${RESET}`)
+  })
+  console.log()
+  console.log(`  ${DIM}Enter numbers (e.g. 1 2  or  1,2,3), or "all"${RESET}`)
+  console.log()
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+
+  rl.question(`${BOLD}Profiles to start:${RESET} `, (answer) => {
+    rl.close()
+
+    const raw = answer.trim().toLowerCase()
+
+    let chosen
+    if (raw === 'all') {
+      chosen = available.map(p => p.name)
+    } else {
+      const indices = raw
+        .split(/[\s,]+/)
+        .map(s => parseInt(s, 10))
+        .filter(n => !isNaN(n))
+
+      const invalid = indices.filter(n => n < 1 || n > available.length)
+      if (invalid.length > 0) {
+        console.error(`[ORCH] Invalid selection: ${invalid.join(', ')} (valid: 1–${available.length})`)
+        process.exit(1)
+      }
+
+      if (indices.length === 0) {
+        console.error('[ORCH] No profiles selected — exiting.')
+        process.exit(1)
+      }
+
+      // Deduplicate while preserving order
+      chosen = [...new Set(indices.map(n => available[n - 1].name))]
+    }
+
+    console.log(`\n[ORCH] Starting: ${chosen.join(', ')}\n`)
+    startProfiles(chosen)
   })
 }
 
