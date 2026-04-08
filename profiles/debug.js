@@ -1,6 +1,7 @@
 // ─── Profile: debug ───────────────────────────────────────────────────────────
-// Connects, sends /skyblock, then prints all blocks + entities within 8 blocks
-// every 5 seconds.  Nothing else runs — pure observation mode.
+// Connects, then prints all blocks + entities within 8 blocks every 5 seconds.
+// Also probes the nearest spawner's NBT + hologram entities once at spawn.
+// Nothing else runs — pure observation mode.
 
 const base = require('./_base')
 
@@ -18,10 +19,10 @@ module.exports = {
       type: 'onSpawn',
       options: { delayMs: 1000 },
       actions: [
-        // delayAfterMs: 1000 → timeout gives 3s of extra buffer
-        { type: 'sendChat', options: { message: '/skyblock', delayAfterMs: 1000, timeoutMs: 4000 } },
+        // Open the nearest spawner GUI and capture the window title ("N SKELETON SPAWNERS").
+        { type: 'logSpawnerData', options: { radius: 32 } },
         // startDebugScan returns immediately (background interval) — no timeout needed
-        { type: 'startDebugScan', options: { radius: 8, intervalMs: 5000 } },
+        // { type: 'startDebugScan', options: { radius: 8, intervalMs: 5000 } },
       ],
     },
   ],
