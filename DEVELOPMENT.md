@@ -10,18 +10,29 @@ To-Do's and features to add:
   - [x] Log in-game chat messages received from the server
   - [x] Log snapshots periodically while connected
 
+- [x] Health check every interval (5mins now) so user knows bot is healthy.
+
+
+
 - [x] Multi-bot system
-  - [ ] Add dynamic profile selection for orchestrator, instead of taking as an argument, make it ask when it opens up.
+  - [x] Add dynamic profile selection for orchestrator, instead of taking as an argument, make it ask when it opens up.
   - [ ] Inter-bot communication or orchestration (e.g. complementary spawner sets; intruder warns other bot)
 
-- [x] Sentinel: 
+### Sentinel: 
   - [x] Define base first; normal behavior near base, freeze actions away from base (maintenance / player gathers)
       - [x] Start with a very basic implementation, like accepting the spawn position as the base and +- 30 blocks each direction
+      - [x] Make it log that
       - [ ] Future: make this base editable.
-  - [ ] Add a whitelist, no alert or panic for those users!
-  - [ ] Future: Add blacklist, direct disconnect for those users
+  - [x] Add a whitelist, no alert or panic for those users!
+  - [x] Future: Add blacklist, direct alert=panic for those users
+  - [x] Log the number of spawners we have in front periodically. Add position of spawners? 
+  - [ ] A stable spawner-breaking mechanism
+  - [ ] Can we access block stack sizes? Log stack counts during the 5‑minute health check too. (Possible — see debug profile and `logSpawnerData` action.) Follow `skills.js` / `world.js` patterns and best practice.
+  - [ ] Place a lower limit on inventory spawner count.
+  - [ ] Configurable manually
+  - [ ] When the count can be resolved, use the value from the latest check
 
-- [ ] Health check every interval so user knows bot is healthy.
+
 
 - [ ] Advanced: structure snapshot and auto-build
   - [ ] Research building sketches & schemas
