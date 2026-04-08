@@ -6,6 +6,7 @@ const registry = {
   playerRadius: require('./playerRadius'),
   blockNearby : require('./blockNearby'),
   onSpawn     : require('./onSpawn'),
+  onInterval  : require('./onInterval'),
 }
 
 // ─── createTriggerRegistry ────────────────────────────────────────────────────
@@ -75,6 +76,11 @@ function createTriggerRegistry() {
     // context carries trigger-specific data so actions can use it directly.
     const baseZone = triggerConfig.baseZone   // optional: { radius: <blocks> }
 
+    // Edge-triggered: track whether we're already known to be out of base so
+    // we log once on the transition out, once on the transition back, and stay
+    // silent in between — no matter how often the trigger fires.
+    let outOfBase = false
+
     const fire = (context = {}) => {
       if (bot._quitting) return Promise.resolve()
 
@@ -86,10 +92,21 @@ function createTriggerRegistry() {
       if (baseZone && bot._base) {
         const dist = bot.entity?.position?.distanceTo(bot._base) ?? Infinity
         if (dist > baseZone.radius) {
-          bot.log.info(
-            `[TRIGGER] "${label}" skipped — ${dist.toFixed(1)} blocks from base (limit ${baseZone.radius})`
-          )
+          if (!outOfBase) {
+            outOfBase = true
+            bot.log.warn(
+              `[TRIGGER] "${label}" — left base region (${dist.toFixed(1)} blocks from base, limit ${baseZone.radius}). Actions paused until return.`
+            )
+          }
           return Promise.resolve()
+        }
+        // Transitioned back inside base
+        if (outOfBase) {
+          outOfBase = false
+          const dist2 = bot.entity?.position?.distanceTo(bot._base) ?? 0
+          bot.log.info(
+            `[TRIGGER] "${label}" — returned to base region (${dist2.toFixed(1)} blocks from base). Actions resumed.`
+          )
         }
       }
 
