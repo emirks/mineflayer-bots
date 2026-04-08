@@ -14,66 +14,139 @@ const world = require('../lib/world')
 // Timing:
 //   checkIntervalMs — slow scan rate (print + alert check)
 //   panicIntervalMs — fast scan rate used only after alert fires
+//
+// Whitelist / Blacklist (optional arrays of usernames, case-insensitive):
+//   whitelist — safe allies; only ever logged with [WL] tag, never trigger alert or panic
+//   blacklist — hostile targets; panic immediately at alertRadius (skip action queue)
 
 function register(bot, options, fire) {
   const {
-    printRadius     = 50,
-    alertRadius     = 20,
-    panicRadius     = 5,
+    printRadius = 50,
+    alertRadius = 20,
+    panicRadius = 5,
     checkIntervalMs = 500,
     panicIntervalMs = 100,
+    whitelist = [],
+    blacklist = [],
   } = options
 
-  let alerted   = false
-  let panicked  = false
+  // Normalise lists to lower-case sets for O(1) lookup
+  const wlSet = new Set(whitelist.map(n => n.toLowerCase()))
+  const blSet = new Set(blacklist.map(n => n.toLowerCase()))
+
+  const isWhitelisted = name => wlSet.size > 0 && wlSet.has(name.toLowerCase())
+  const isBlacklisted = name => blSet.size > 0 && blSet.has(name.toLowerCase())
+
+  let alerted = false
+  let panicked = false
   // Hoisted so cancel() can clear it even if startPanicWatch() was called.
   let fastInterval = null
+
+  // Tracks the last logged position (rounded to 2 dp) per username as a string key.
+  // Position-based comparison handles circular movement where distance stays constant.
+  const prevPos = new Map()   // username → "x,y,z" string at 2 dp
+
+  function distTag(username) {
+    return isWhitelisted(username) ? '[WL]' : isBlacklisted(username) ? '[BL]' : '    '
+  }
+
+  // ── Shared emergency disconnect (used by both blacklist and panic watch) ────
+  function triggerPanic(username, distance, source) {
+    if (panicked) return
+    panicked = true
+    clearInterval(fastInterval)
+
+    const elapsed = bot._alertTime
+      ? ((Date.now() - bot._alertTime) / 1000).toFixed(2)
+      : '?'
+
+    bot.log.error(
+      `[TRIGGER] PANIC — ${username} within ${source} range ` +
+      `(${distance.toFixed(2)} m) — emergency disconnect!` +
+      (bot._alertTime ? ` (+${elapsed}s since alert)` : ''),
+    )
+
+    bot._quitting = true
+    if (bot.pathfinder) bot.pathfinder.stop()
+    bot.quit()
+  }
 
   // ── Slow interval: distance logging + alert check ──────────────────────────
   const slowInterval = setInterval(() => {
     if (!bot.entity) return
 
+    // ── Print-radius distance log (change-only) ───────────────────────────────
     const visible = world.getNearbyPlayers(bot, printRadius)
+    const currentNames = new Set()
+
     for (const entity of visible) {
-      const distance = bot.entity.position.distanceTo(entity.position)
-      bot.log.info(`[DIST] ${entity.username.padEnd(16)} → ${distance.toFixed(2)} blocks`)
-    }
+      const p    = entity.position
+      const posKey = `${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`
+      currentNames.add(entity.username)
 
-    if (!alerted) {
-      const closest = world.getNearestEntityWhere(
-        bot,
-        e => e.type === 'player' && e.username !== bot.username,
-        alertRadius,
-      )
-
-      if (closest) {
-        alerted = true
-        clearInterval(slowInterval)
-
-        bot._alertTime = Date.now()
-        const distance = bot.entity.position.distanceTo(closest.position)
-        bot.log.warn(
-          `[TRIGGER] ALERT — ${closest.username} within ${alertRadius} blocks ` +
-          `(${distance.toFixed(2)} m) — running action stack + arming panic watch`,
+      if (prevPos.get(entity.username) !== posKey) {
+        prevPos.set(entity.username, posKey)
+        const dist = bot.entity.position.distanceTo(p)
+        bot.log.info(
+          `[DIST]${distTag(entity.username)} ${entity.username.padEnd(16)}` +
+          ` → ${dist.toFixed(2)} blocks  (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`,
         )
-
-        // Kick off action stack (async, non-blocking).
-        fire({ username: closest.username, distance }).then(() => {
-          const elapsed = ((Date.now() - bot._alertTime) / 1000).toFixed(2)
-          bot.log.info(`[TRIGGER] Action chain finished — ${elapsed}s since alert.`)
-        })
-
-        // Immediately arm the fast panic watch
-        startPanicWatch()
       }
     }
+
+    // Players who left the detection area since last tick
+    for (const [username] of prevPos) {
+      if (!currentNames.has(username)) {
+        prevPos.delete(username)
+        bot.log.info(`[DIST]${distTag(username)} ${username.padEnd(16)} → out of detection area`)
+      }
+    }
+
+    if (alerted || panicked) return
+
+    // ── Alert-radius check ────────────────────────────────────────────────────
+    const closestInAlert = world.getNearestEntityWhere(
+      bot,
+      e => e.type === 'player' && e.username !== bot.username && !isWhitelisted(e.username),
+      alertRadius,
+    )
+
+    if (!closestInAlert) return
+
+    const distance = bot.entity.position.distanceTo(closestInAlert.position)
+    bot._alertTime = Date.now()
+
+    if (isBlacklisted(closestInAlert.username)) {
+      // Blacklisted player — skip action queue, panic immediately
+      bot.log.warn(
+        `[TRIGGER] BLACKLIST ALERT — ${closestInAlert.username} within ${alertRadius} blocks ` +
+        `(${distance.toFixed(2)} m) — panicking immediately`,
+      )
+      clearInterval(slowInterval)
+      triggerPanic(closestInAlert.username, distance, `alertRadius (${alertRadius} blocks, blacklisted)`)
+      return
+    }
+
+    // Normal (unlisted) player — fire action stack + arm panic watch
+    alerted = true
+    clearInterval(slowInterval)
+
+    bot.log.warn(
+      `[TRIGGER] ALERT — ${closestInAlert.username} within ${alertRadius} blocks ` +
+      `(${distance.toFixed(2)} m) — running action stack + arming panic watch`,
+    )
+
+    fire({ username: closestInAlert.username, distance }).then(() => {
+      const elapsed = ((Date.now() - bot._alertTime) / 1000).toFixed(2)
+      bot.log.info(`[TRIGGER] Action chain finished — ${elapsed}s since alert.`)
+    })
+
+    startPanicWatch()
   }, checkIntervalMs)
 
   // ── Fast interval: emergency disconnect if player gets too close ───────────
   function startPanicWatch() {
     // panicRadius <= 0 means "panic watch disabled" — skip silently.
-    // Without this guard, the condition `distanceTo < 0` would never be true
-    // and the interval would run forever doing nothing useful.
     if (panicRadius <= 0) {
       bot.log.info('[TRIGGER] panicRadius ≤ 0 — panic watch disabled')
       return
@@ -84,31 +157,14 @@ function register(bot, options, fire) {
 
       const closest = world.getNearestEntityWhere(
         bot,
-        e => e.type === 'player' && e.username !== bot.username,
+        // Whitelisted players never trigger panic
+        e => e.type === 'player' && e.username !== bot.username && !isWhitelisted(e.username),
         panicRadius,
       )
 
       if (closest) {
-        panicked = true
-        clearInterval(fastInterval)
-
         const distance = bot.entity.position.distanceTo(closest.position)
-        const elapsed  = bot._alertTime
-          ? ((Date.now() - bot._alertTime) / 1000).toFixed(2)
-          : '?'
-        bot.log.error(
-          `[TRIGGER] PANIC — ${closest.username} within ${panicRadius} blocks ` +
-          `(${distance.toFixed(2)} m) — emergency disconnect! (+${elapsed}s since alert)`,
-        )
-
-        // Signal the action executor to abort any in-flight chain before we
-        // kill the connection.  The executor checks this flag at each step so
-        // it stops issuing bot commands to a closing socket.
-        bot._quitting = true
-        // Stop pathfinder immediately so any awaiting goto() rejects right now
-        // instead of waiting for the socket-close error to propagate.
-        if (bot.pathfinder) bot.pathfinder.stop()
-        bot.quit()
+        triggerPanic(closest.username, distance, `panicRadius (${panicRadius} blocks)`)
       }
     }, panicIntervalMs)
   }
