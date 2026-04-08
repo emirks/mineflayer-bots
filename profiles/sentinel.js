@@ -22,8 +22,8 @@ module.exports = {
       baseZone: { radius: 30 },
       options: {
         printRadius: 500000,   // log [DIST] for every player within this range
-        alertRadius: 2,    // fire action stack + arm panic watch
-        panicRadius: 0,    // emergency bot.quit() — ignores running actions
+        alertRadius: 8,    // fire action stack + arm panic watch
+        panicRadius: 2,    // emergency bot.quit() — ignores running actions
         checkIntervalMs: 500,  // slow scan rate (print + alert)
         panicIntervalMs: 100,  // fast scan rate after alert fires
       },
@@ -40,7 +40,7 @@ module.exports = {
             timeoutMs: 300000,   // 5 min wall-clock cap (maxRounds guards loops; this guards stuck navigation)
           },
         },
-        { type: 'dropItems', options: { item: 'spawner', timeoutMs: 15000 } },
+        // { type: 'dropItems', options: { item: 'spawner', timeoutMs: 15000 } },
         { type: 'disconnect' },
       ],
     },
