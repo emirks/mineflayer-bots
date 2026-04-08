@@ -29,6 +29,18 @@ module.exports = {
     firstPerson: false,
   },
 
+  // ── Health heartbeat ────────────────────────────────────────────────────────
+  // Every intervalMs a [HEALTH] line is written to session.log with uptime,
+  // hp, food, position, and online-player count.  pingCommand is also sent
+  // as a chat command — the server's reply appears as [CHAT] confirming the
+  // TCP connection is alive.  Set pingCommand: null to skip the command.
+  healthCheck: {
+    enabled: true,
+    intervalMs: 300_000,   // base interval: 5 minutes
+    jitterMs:    30_000,   // ±30 s random offset — avoids perfectly mechanical cadence
+    pingCommand: '/ping',  // null = log-only (no command sent)
+  },
+
   // ── Protocol debug (all profiles) ───────────────────────────────────────────
   // Set enabled: true or run with MC_PROTOCOL_DEBUG=1 for low-level packet logs.
   // Optional: DEBUG=minecraft-protocol (minecraft-protocol's own verbose trace).
