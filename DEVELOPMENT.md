@@ -11,11 +11,17 @@ To-Do's and features to add:
   - [x] Log snapshots periodically while connected
 
 - [x] Multi-bot system
+  - [ ] Add dynamic profile selection for orchestrator, instead of taking as an argument, make it ask when it opens up.
   - [ ] Inter-bot communication or orchestration (e.g. complementary spawner sets; intruder warns other bot)
 
-- [x] Sentinel: define base first; normal behavior near base, freeze actions away from base (maintenance / player gathers)
-    - [x] Start with a very basic implementation, like accepting the spawn position as the base and +- 30 blocks each direction
-    - [ ] In the future make this base editable.
+- [x] Sentinel: 
+  - [x] Define base first; normal behavior near base, freeze actions away from base (maintenance / player gathers)
+      - [x] Start with a very basic implementation, like accepting the spawn position as the base and +- 30 blocks each direction
+      - [ ] Future: make this base editable.
+  - [ ] Add a whitelist, no alert or panic for those users!
+  - [ ] Future: Add blacklist, direct disconnect for those users
+
+- [ ] Health check every interval so user knows bot is healthy.
 
 - [ ] Advanced: structure snapshot and auto-build
   - [ ] Research building sketches & schemas
