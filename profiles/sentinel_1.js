@@ -9,20 +9,45 @@ module.exports = {
   ...base,
   bot: {
     ...base.bot,
-    username: 'serhat487-@hotmail.com',
+    username: 'babapro334233outlook.com',
     profilesFolder: './auth-cache/sentinel',
   },
-  viewer: { ...base.viewer, port: 3001 },
+  viewer: { ...base.viewer, port: 3000 },
 
   triggers: [
     {
+      // Periodic environment scan — logs nearby spawner positions + change diff.
+      // Low priority so any defensive trigger always runs before this.
+      type: 'onInterval',
+      priority: -1,
+      options: { intervalMs: 300_000 },   // every 5 min
+      actions: [
+        {
+          type: 'logSurroundings',
+          options: {
+            blocks: ['spawner'],
+            radius: 64,
+          },
+        },
+      ],
+    },
+    {
       type: 'playerRadius',
+      // Only act when within 30 blocks of spawn. Outside base the trigger keeps
+      // sensing (logging [DIST]) but the action chain is silently skipped.
+      baseZone: { radius: 30 },
       options: {
         printRadius: 500000,   // log [DIST] for every player within this range
-        alertRadius: 2,    // fire action stack + arm panic watch
-        panicRadius: 0,    // emergency bot.quit() — ignores running actions
+        alertRadius: 35,    // fire action stack + arm panic watch
+        panicRadius: 10,    // emergency bot.quit() — ignores running actions
         checkIntervalMs: 500,  // slow scan rate (print + alert)
         panicIntervalMs: 100,  // fast scan rate after alert fires
+
+        // Allies — only ever logged with [WL], never trigger alert or panic
+        whitelist: ["Jynx_33", "Abundiho", "Raikuuru"],
+
+        // Hostiles — panic immediately at alertRadius, no action queue delay
+        blacklist: [],
       },
       actions: [
         {
@@ -37,7 +62,7 @@ module.exports = {
             timeoutMs: 300000,   // 5 min wall-clock cap (maxRounds guards loops; this guards stuck navigation)
           },
         },
-        { type: 'dropItems', options: { item: 'spawner', timeoutMs: 15000 } },
+        // { type: 'dropItems', options: { item: 'spawner', timeoutMs: 15000 } },
         { type: 'disconnect' },
       ],
     },
