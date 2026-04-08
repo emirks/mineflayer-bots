@@ -268,6 +268,12 @@
 ║ │ │     Where(pred, dist) │ │    blockDelay(bot) → reads               │ │    ║
 ║ │ │                       │ │      bot._config.skills.blockPlaceDelay  │ │    ║
 ║ │ │                       │ │      per-call (not module-level constant) │ │    ║
+║ │ │   getSpawnerStackCount│ │                                           │ │    ║
+║ │ │    (bot,block,ms)     │ │                                           │ │    ║
+║ │ │   opens spawner GUI   │ │                                           │ │    ║
+║ │ │   reads windowOpen    │ │                                           │ │    ║
+║ │ │   title.value.text.v  │ │                                           │ │    ║
+║ │ │   → stack count int   │ │                                           │ │    ║
 ║ │ │   getNearbyPlayers    │ │  Exports:                                 │ │    ║
 ║ │ │   getPosition         │ │    breakBlockAt(bot, x,y,z)               │ │    ║
 ║ │ │   getNearbyBlockTypes │ │    goToPosition(bot, x,y,z, minDist)      │ │    ║
@@ -614,6 +620,7 @@ profile.triggers[n]  │  type: 'playerRadius'                                  
 
 | Operation | Your Code | lib | mineflayer API | minecraft-protocol packet |
 |-----------|-----------|-----|----------------|--------------------------|
+| **Read spawner stack count** | `world.getSpawnerStackCount(bot, block)` | world.js | `bot.activateBlock(block)` → `windowOpen` event → `bot.closeWindow(w)` | `player_block_placement` OUT · `open_window` IN (title = prismarine-nbt compound: `title.value.text.value` = `"N MOB spawners"`) |
 | Find nearby block | `world.getNearestBlock(bot, 'chest', 32)` | world.js | `bot.findBlocks({matching, maxDistance})` | chunk data (already received) |
 | Get block at position | `world.getBlockAtPosition(bot, 0,-1,0)` | world.js | `bot.blockAt(vec3)` | chunk data |
 | Find nearby players | `world.getNearbyPlayers(bot, 50)` | world.js | `bot.players` / `bot.entities` | `player_info`, `spawn_entity` |
