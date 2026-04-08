@@ -1,6 +1,10 @@
 # Changelog
 
 ## 2026-04-08
+- **fix** `lib/logger.js` — `LOGS_BASE` now uses `path.dirname(process.execPath)` when `process.pkg` is truthy; fixes "Cannot mkdir in a snapshot" crash when running the packaged exe
+- **feat** `lib/createBotSession.js` — when `process.pkg` is true, loads the profile from the real filesystem next to the exe (`<exeDir>/<profileName>.js`) instead of the read-only snapshot; allows the friend to edit the profile in Notepad without rebuilding
+- **chore** `package.json` — added `postbuild` script that copies `profiles/sentinel.js` + `profiles/_base.js` to `dist/` after every `pnpm build`; `dist/` is the complete folder to ship
+- **chore** `package.json` + `launch-sentinel.js` (new) — added `@yao-pkg/pkg` dev dependency; `pkg` config bundles all profiles/triggers/actions/lib + minecraft-data assets; `pnpm build` produces `dist/sentinel-bot.exe` (Node 18 embedded, ~76 MB); `launch-sentinel.js` calls `spawnBot` directly (not via argv) because `require.main === module` is false inside a pkg exe; `pnpm.overrides.into-stream: 6` fixes ESM crash on Node 20
 - **feat** `lib/createBotSession.js` — records `bot._base = bot.entity.position.clone()` on first spawn so triggers can reference the bot's home position
 - **feat** `triggers/index.js` — `fire()` now checks `triggerConfig.baseZone` before queuing an action chain; if the bot is farther than `baseZone.radius` blocks from `bot._base` the chain is silently skipped (sensing keeps running); distance is logged at info level for visibility
 - **feat** `profiles/sentinel.js` — added `baseZone: { radius: 30 }` to the `playerRadius` trigger; sentinel actions only execute when within 30 blocks of spawn; logs `[TRIGGER] skipped — Xm from base` when outside
