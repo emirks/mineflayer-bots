@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-04-08
+- **feat** `orchestrator.js` — CLI now shows an interactive profile picker when run with no arguments; scans `profiles/` (skips `_base.js`), reads each file's leading comment as a description, prints a numbered list, and accepts space/comma-separated numbers or `"all"`; argv path still works unchanged; no new dependencies (uses Node built-ins `fs` + `readline`)
 - **fix** `lib/logger.js` — `LOGS_BASE` now uses `path.dirname(process.execPath)` when `process.pkg` is truthy; fixes "Cannot mkdir in a snapshot" crash when running the packaged exe
 - **feat** `lib/createBotSession.js` — when `process.pkg` is true, loads the profile from the real filesystem next to the exe (`<exeDir>/<profileName>.js`) instead of the read-only snapshot; allows the friend to edit the profile in Notepad without rebuilding
 - **chore** `package.json` — added `postbuild` script that copies `profiles/sentinel.js` + `profiles/_base.js` to `dist/` after every `pnpm build`; `dist/` is the complete folder to ship
