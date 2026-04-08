@@ -13,9 +13,9 @@
   },
   "scripts": {
     "start": "node bot.js",
-    "gui":   "node gui/server.js",
-    "build": "pkg launch-sentinel.js --targets node18-win-x64 --output dist/sentinel-bot.exe --compress GZip",
-    "postbuild": "node -e \"const fs=require('fs'); fs.copyFileSync('profiles/sentinel.js','dist/sentinel.js'); fs.copyFileSync('profiles/_base.js','dist/_base.js'); console.log('Copied sentinel.js + _base.js to dist/')\""
+    "gui": "node gui/server.js",
+    "build": "pkg launch.js --targets node18-win-x64 --output dist/sentinel.exe --compress GZip",
+    "postbuild": "node scripts/copy-dist-profiles.js && node scripts/zip-dist.js"
   },
   "pkg": {
     "scripts": [
@@ -23,7 +23,8 @@
       "lib/**/*.js",
       "triggers/**/*.js",
       "actions/**/*.js",
-      "profiles/**/*.js"
+      "profiles/**/*.js",
+      "launch.js"
     ],
     "assets": [
       "node_modules/minecraft-data/data/**"
@@ -46,6 +47,7 @@
     "vec3": "^0.2.0"
   },
   "devDependencies": {
-    "@yao-pkg/pkg": "^6.14.2"
+    "@yao-pkg/pkg": "^6.14.2",
+    "archiver": "^7.0.1"
   }
 }
