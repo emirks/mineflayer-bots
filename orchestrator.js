@@ -119,36 +119,38 @@ function spawnInstance(instance) {
     ...base,
     bot: {
       ...base.bot,
-      username:       instance.username       || base.bot.username,
-      host:           instance.host           || base.bot.host,
-      port:           Number(instance.port)   || base.bot.port,
-      auth:           instance.auth           || base.bot.auth,
+      username: instance.username || base.bot.username,
+      host: instance.host || base.bot.host,
+      port: Number(instance.port) || base.bot.port,
+      auth: instance.auth || base.bot.auth,
       // Each account gets its own auth-cache subfolder to avoid token collisions
       profilesFolder: path.join('./auth-cache', safeUser),
     },
     viewer: {
       ...base.viewer,
-      enabled:     instance.viewerEnabled ?? base.viewer?.enabled ?? true,
-      port:        Number(instance.viewerPort) || base.viewer?.port || 3000,
+      enabled: instance.viewerEnabled ?? base.viewer?.enabled ?? true,
+      port: Number(instance.viewerPort) || base.viewer?.port || 3000,
       firstPerson: instance.viewerFirstPerson ?? base.viewer?.firstPerson ?? false,
     },
     // Meta — used by createBotSession for log labels
-    _instanceId:      instance.id,
+    _instanceId: instance.id,
     _profileTemplate: instance.profile,
   }
 
   return spawnBot({
-    profile:      instance.id,   // use instance ID as the manager-map key
+    profile: instance.id,   // use instance ID as the manager-map key
     profileConfig,
-    reconnect:    instance.reconnect   ?? true,
-    maxRetries:   instance.maxRetries  ?? Infinity,
-    baseDelayMs:  instance.baseDelayMs ?? 5000,
+    reconnect: instance.reconnect ?? true,
+    maxRetries: instance.maxRetries ?? Infinity,
+    baseDelayMs: instance.baseDelayMs ?? 5000,
   })
 }
 
-// ── CLI entry point ───────────────────────────────────────────────────────────
-if (require.main === module) {
-  const fs       = require('fs')
+module.exports = { spawnBot, spawnInstance, stopBot, getBotStates, EventBus, BotState }
+
+// ── CLI helpers ───────────────────────────────────────────────────────────────
+{
+  const fs = require('fs')
   const readline = require('readline')
 
   /** Extract the description lines from a profile file's leading comment block. */
@@ -176,9 +178,13 @@ if (require.main === module) {
     return descLines.length ? descLines.join('  ') : '(no description)'
   }
 
-  /** Scan profiles/ and return [{ name, description }] sorted alphabetically. */
+  /** Scan profiles/ and return [{ name, desc }] sorted alphabetically.
+   *  When running as a pkg exe, reads from the directory next to the exe
+   *  so the friend can add/edit profile files without rebuilding. */
   function listProfiles() {
-    const dir = path.join(__dirname, 'profiles')
+    const dir = process.pkg
+      ? path.join(path.dirname(process.execPath), 'profiles')
+      : path.join(__dirname, 'profiles')
     return fs.readdirSync(dir)
       .filter(f => f.endsWith('.js') && !f.startsWith('_'))
       .sort()
@@ -204,6 +210,7 @@ if (require.main === module) {
     registerSIGINT()
   }
 
+  function runCLI() {
   // If profiles are passed directly as argv, skip the interactive prompt
   const argvProfiles = process.argv.slice(2)
   if (argvProfiles.length > 0) {
@@ -219,14 +226,14 @@ if (require.main === module) {
     process.exit(1)
   }
 
-  const BOLD  = '\x1b[1m'
-  const CYAN  = '\x1b[36m'
-  const DIM   = '\x1b[2m'
+  const BOLD = '\x1b[1m'
+  const CYAN = '\x1b[36m'
+  const DIM = '\x1b[2m'
   const RESET = '\x1b[0m'
 
   console.log(`\n${BOLD}Available profiles:${RESET}\n`)
   available.forEach(({ name, desc }, i) => {
-    const num   = `${CYAN}[${i + 1}]${RESET}`
+    const num = `${CYAN}[${i + 1}]${RESET}`
     const label = `${BOLD}${name}${RESET}`
     console.log(`  ${num} ${label}${DIM}  —  ${desc}${RESET}`)
   })
@@ -268,6 +275,10 @@ if (require.main === module) {
     console.log(`\n[ORCH] Starting: ${chosen.join(', ')}\n`)
     startProfiles(chosen)
   })
+  } // end runCLI
+
+  module.exports.runCLI = runCLI
+
+  if (require.main === module) runCLI()
 }
 
-module.exports = { spawnBot, spawnInstance, stopBot, getBotStates, EventBus, BotState }
