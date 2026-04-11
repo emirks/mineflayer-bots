@@ -3,3 +3,7 @@ package-lock.json
 auth-cache/
 logs/
 dist/
+
+# Local scratch / one-off patch scripts (not part of the project)
+_patch_*
+*.bak
