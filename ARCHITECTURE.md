@@ -139,7 +139,7 @@
 ║ │ │   playerRadius       onSpawn(1s)          onSpawn(3s)             │ │    ║
 ║ │ │    alert@3             →/skyblock           →/warp market          │ │    ║
 ║ │ │    panic@0             →debugScan(r=8)    blockNearby(chest,r=20) │ │    ║
-║ │ │    →breakAllBlocks                          →takeFromChest(bone)   │ │    ║
+║ │ │    →sentinelSweep                           →takeFromChest(bone)   │ │    ║
 ║ │ │      (spawner,r=64)                         →/sell all             │ │    ║
 ║ │ │    →dropItems(spawner)                      →pickupItems           │ │    ║
 ║ │ │    →disconnect                            playerRadius             │ │    ║
@@ -219,13 +219,27 @@
 ║ │ │  breakBlock.js        world.getNearestBlock()                       │ │    ║
 ║ │ │                       skills.breakBlockAt(x,y,z)                   │ │    ║
 ║ │ │                                                                     │ │    ║
-║ │ │  breakAllBlocks.js    world.getNearestBlocks()  [re-scans in loop]  │ │    ║
+║ │ │  sentinelSweep.js     round-robin sweep until no spawners remain    │ │    ║
+║ │ │                       reads bot._spawnerSurvey → totalExpected      │ │    ║
+║ │ │                       (populated by surveySpawners action, not here)│ │    ║
+║ │ │                       world.getNearestBlocks() per round (local)    │ │    ║
 ║ │ │                       skills.goToPosition(x,y,z, stopAt=4)         │ │    ║
 ║ │ │                       bot.setControlState('sneak', true)            │ │    ║
+║ │ │                       sleep(sneakSyncMs=60) ← one physics tick so   │ │    ║
+║ │ │                         sneak packet precedes dig START             │ │    ║
 ║ │ │                       skills.breakBlockAt(x,y,z)                   │ │    ║
-║ │ │                       bot.setControlState('sneak', false)           │ │    ║
-║ │ │                       await random delay (400–1600 ms)              │ │    ║
-║ │ │                       repeat until empty · cap: maxRounds=500       │ │    ║
+║ │ │                       termination: primary=world scan 0 blocks      │ │    ║
+║ │ │                         ghost guard: wait + rescan before exiting   │ │    ║
+║ │ │                         betweenSweepsMs only when blocks.length ≤ 2 │ │    ║
+║ │ │                       post-exit inventory verification loop:        │ │    ║
+║ │ │                         re-breaks reappeared blocks until           │ │    ║
+║ │ │                         collected ≥ totalExpected or timeout        │ │    ║
+║ │ │                                                                     │ │    ║
+║ │ │  surveySpawners.js    calls surveySpawners() skill (navigate+GUI)   │ │    ║
+║ │ │                       saves result to bot._spawnerSurvey:           │ │    ║
+║ │ │                         { timestamp, results, totalExpected }       │ │    ║
+║ │ │                       run at spawn (+10 s) + every 5 min via        │ │    ║
+║ │ │                       onInterval — sentinel sentinel sentinel        │ │    ║
 ║ │ │                                                                     │ │    ║
 ║ │ │  takeFromChest.js     skills.takeFromChest(itemName, num)           │ │    ║
 ║ │ │  goToBlock.js         skills.goToNearestBlock(name, minDist, r)    │ │    ║
@@ -268,12 +282,6 @@
 ║ │ │     Where(pred, dist) │ │    blockDelay(bot) → reads               │ │    ║
 ║ │ │                       │ │      bot._config.skills.blockPlaceDelay  │ │    ║
 ║ │ │                       │ │      per-call (not module-level constant) │ │    ║
-║ │ │   getSpawnerStackCount│ │                                           │ │    ║
-║ │ │    (bot,block,ms)     │ │                                           │ │    ║
-║ │ │   opens spawner GUI   │ │                                           │ │    ║
-║ │ │   reads windowOpen    │ │                                           │ │    ║
-║ │ │   title.value.text.v  │ │                                           │ │    ║
-║ │ │   → stack count int   │ │                                           │ │    ║
 ║ │ │   getNearbyPlayers    │ │  Exports:                                 │ │    ║
 ║ │ │   getPosition         │ │    breakBlockAt(bot, x,y,z)               │ │    ║
 ║ │ │   getNearbyBlockTypes │ │    goToPosition(bot, x,y,z, minDist)      │ │    ║
@@ -575,7 +583,7 @@ node orchestrator.js sentinel trader
 profile.triggers[n]  │  type: 'playerRadius'                                   │
                      │  priority: 10  (optional; higher = runs first in queue)  │
                      │  options: { alertRadius:3, ... }                         │
-                     │  actions: [ {type:'breakAllBlocks', options:{timeoutMs:300000}},│
+                     │  actions: [ {type:'sentinelSweep', options:{ghostBlockWaitMs,│
                      │             {type:'disconnect'} ]                        │
                      └────────────────────┬────────────────────────────────────┘
                                           │ registerTrigger(bot, cfg)
@@ -601,7 +609,7 @@ profile.triggers[n]  │  type: 'playerRadius'                                  
                                           │
                        ┌──────────────────┴──────────────────┐
                        ▼                                     ▼
-              breakAllBlocks                           disconnect
+              sentinelSweep (round-robin + survey)      disconnect
               world.getNearestBlocks()                 bot._quitting = true
               skills.goToPosition()                    bot.pathfinder.stop()
               skills.breakBlockAt()                    bot.quit()
@@ -620,7 +628,8 @@ profile.triggers[n]  │  type: 'playerRadius'                                  
 
 | Operation | Your Code | lib | mineflayer API | minecraft-protocol packet |
 |-----------|-----------|-----|----------------|--------------------------|
-| **Read spawner stack count** | `world.getSpawnerStackCount(bot, block)` | world.js | `bot.activateBlock(block)` → `windowOpen` event → `bot.closeWindow(w)` | `player_block_placement` OUT · `open_window` IN (title = prismarine-nbt compound: `title.value.text.value` = `"N MOB spawners"`) |
+| **Inspect spawner (stack + ammo)** | `getSpawnerInfo(bot, block)` | skills/spawnerSurvey.js | `bot.activateBlock(block)` → `windowOpen` event → `win.containerItems()` → `bot.closeWindow(win)` | `player_block_placement` OUT · `open_window` IN (title = prismarine-nbt compound: `title.value.text.value` = `"N MOB spawners"`) |
+| **Survey all nearby spawners** | `surveySpawners(bot, options)` | skills/spawnerSurvey.js | `skills.goToPosition()` per block → `getSpawnerInfo()` per block | movement packets + `player_block_placement` / `open_window` per spawner |
 | Find nearby block | `world.getNearestBlock(bot, 'chest', 32)` | world.js | `bot.findBlocks({matching, maxDistance})` | chunk data (already received) |
 | Get block at position | `world.getBlockAtPosition(bot, 0,-1,0)` | world.js | `bot.blockAt(vec3)` | chunk data |
 | Find nearby players | `world.getNearbyPlayers(bot, 50)` | world.js | `bot.players` / `bot.entities` | `player_info`, `spawn_entity` |
@@ -709,7 +718,7 @@ vec3i16 scale:  raw_i16 ÷ 8000 = blocks/tick
 
 | Profile | Viewer port | Triggers | Primary purpose |
 |---------|-------------|---------|----------------|
-| `sentinel` | 3000 | `playerRadius` | Break spawners + disconnect when player enters 3-block radius |
+| `sentinel` | 3000 | `onSpawn`(+10s) + `onInterval`(5min) + `playerRadius` | Survey spawners at startup (caches `bot._spawnerSurvey`); on alert: sentinelSweep + disconnect |
 | `debug` | 3002 | `onSpawn` | Send `/skyblock` then print all nearby blocks + entities every 5 s |
 | `trader` | 3001 | `onSpawn` + `blockNearby` + `playerRadius` | Warp to market → loot chest → sell → pick up drops; panic-disconnect on player |
 
@@ -719,6 +728,34 @@ Multi-bot:   `node orchestrator.js sentinel trader`  (auto-reconnect, shared Eve
 ---
 
 ## 8 · Extending the System
+
+### New Skill (preferred — does not touch `lib/skills.js`)
+`lib/skills/mySkill.js` → `module.exports = { mySkill }` → export from `lib/skills/index.js`.
+
+**Important:** Node resolves `lib/skills.js` before `lib/skills/index.js`.  Until the migration
+(rename `skills.js` → `skills/_legacy.js`) is done, actions must import custom skills **directly**:
+```js
+const { surveySpawners } = require('../lib/skills/spawnerSurvey')  // ✅ direct import
+const { surveySpawners } = require('../lib/skills')                 // ❌ resolves to skills.js
+```
+
+Existing skills (`lib/skills.js`): add there only if the function is a thin wrapper over `world.*`
+or `bot.*` with no DonutSMP-specific domain logic. Otherwise keep it in `lib/skills/`.
+
+**`lib/skills/spawnerSurvey.js`** — first custom skill module (example / reference):
+- `surveySpawners(bot, options)` — navigate to every spawner in radius, open GUI via
+  `world.getSpawnerInfo`, log per-spawner data + totals; returns structured result array.
+- `DEFAULT_AMMO_ITEMS` — `['bone', 'arrow']`; pass `ammoItems` option to override.
+
+### New world query (add directly to `lib/world.js`)
+`world.js` is the right place for **passive, already-loaded-chunk reads** only — it must stay
+fully synchronous except for `isClearPath` (a local pathfind probe, no packets).
+Functions that send packets to the server and await a server response (e.g. opening a GUI,
+waiting for `windowOpen`) are **actions** and belong in `lib/skills/`.
+
+`world.js` is not a "don't-touch" file — add new spatial query functions there freely.
+A `lib/world/` extension folder is not needed until world.js grows to the scale of
+`skills.js` (~2100 lines).
 
 ### New Action
 1. `actions/myAction.js` → `async function myAction(bot, options, context) {}; module.exports = myAction`
