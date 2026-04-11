@@ -13,7 +13,6 @@ To-Do's and features to add:
 - [x] Health check every interval (5mins now) so user knows bot is healthy.
 
 
-
 - [x] Multi-bot system
   - [x] Add dynamic profile selection for orchestrator, instead of taking as an argument, make it ask when it opens up.
   - [ ] Inter-bot communication or orchestration (e.g. complementary spawner sets; intruder warns other bot)
@@ -21,25 +20,27 @@ To-Do's and features to add:
 ### Sentinel: 
   - [x] Define base first; normal behavior near base, freeze actions away from base (maintenance / player gathers)
       - [x] Start with a very basic implementation, like accepting the spawn position as the base and +- 30 blocks each direction
-      - [x] Make it log that
-      - [ ] Future: make this base editable.
+      - [x] ** Make it log once when out and once when went in!
+      - [ ] Future: make this base position editable.
+      - [x] Fix: Panic is not disabled bcs its not an action, no fire wrapper, do a check for it!
   - [x] Add a whitelist, no alert or panic for those users!
   - [x] Future: Add blacklist, direct alert=panic for those users
   - [x] Log the number of spawners we have in front periodically. Add position of spawners? 
-  - [ ] A stable spawner-breaking mechanism
-  - [ ] Can we access block stack sizes? Log stack counts during the 5‑minute health check too. (Possible — see debug profile and `logSpawnerData` action.) Follow `skills.js` / `world.js` patterns and best practice.
-  - [ ] Place a lower limit on inventory spawner count.
-  - [ ] Configurable manually
-  - [ ] When the count can be resolved, use the value from the latest check
-
-
+  - [x] A stable spawner-breaking mechanism
+  - [x] Can we access block stack sizes? Log stack counts during the 5‑minute health check too. (Possible — see debug profile and `logSpawnerData` action.) Follow `skills.js` / `world.js` patterns and best practice.
+  - [x] Place a lower limit on inventory spawner count. Don't quit without gathering N number of Spawners
+    - [x] Configurable manually
+    - [x] When the count can be resolved, use the value from the latest check
+  
+### Spawner Bone Dropper
+  - [x] Log everything, debugSpawnerWindow! 
+  - [x] Implement Bone Dropping & Selling Mechanism
+  - [ ] Implement throttling mechanism. N_bones/min
 
 - [ ] Advanced: structure snapshot and auto-build
   - [ ] Research building sketches & schemas
 
 - [ ] AFK avoidance - random movements etc
-
-- [ ] Don't quit without gatherint N number of Spawners
 
 - [ ] Handle non-intentional disconnection logic like closing viewer
 ### The following error crashesthe orchestrator as a whole!
@@ -74,31 +75,3 @@ Emitted 'error' event on Server instance at:
 }
 
 Node.js v20.18.3
-
-Fixes:
-## Summary
-
-| Issue | Severity | Affects |
-|-------|----------|---------|
-| `bot.on('spawn')` re-registers triggers on dimension change | Critical | All profiles with `/warp` or `/skyblock` commands |
-| No cross-trigger action mutex | Critical | trader (concurrent onSpawn + blockNearby), any multi-trigger profile |
-| `startDebugScan` leaks forever, no cleanup handle | High | debug profile, any profile using it mid-stack |
-| Context from `fire()` is silently dropped | High | All triggers — forces redundant re-scans |
-| No per-action timeout — pathfinder can block forever | High | Any action using `goToPosition`, `takeFromChest` |
-| `runtimeConfig` singleton breaks multi-bot-per-process | Medium | Future extensibility |
-| Panic quit races an in-flight action chain | Medium | sentinel + trader under panic |
-| `panicRadius: 0` silently never fires | Minor | sentinel profile |
-| No trigger cancel/cleanup API | Minor | Future reconnect scenarios |
-
-## Priority fixes (in order)
-
-- [ ] **Critical** — Fix `bot.on('spawn')` re-registering triggers on dimension change (affects `/warp`, `/skyblock`).
-- [ ] **Critical** — Add cross-trigger action mutex (trader onSpawn + blockNearby; any multi-trigger profile).
-- [ ] **High** — Add cleanup for `startDebugScan` (no forever leak; debug / mid-stack use).
-- [ ] **High** — Preserve or thread context from `fire()` (stop silent drop / redundant re-scans).
-- [ ] **High** — Per-action timeout for pathfinder-heavy actions (`goToPosition`, `takeFromChest`).
-- [ ] **Medium** — Replace or scope `runtimeConfig` singleton for multi-bot-per-process.
-- [ ] **Medium** — Serialize or cancel in-flight action chain on panic quit (sentinel + trader).
-- [ ] **Minor** — Treat `panicRadius: 0` explicitly (document, warn, or fire — not silent never-fire).
-- [ ] **Minor** — Trigger cancel/cleanup API for reconnect and teardown scenarios.
-
