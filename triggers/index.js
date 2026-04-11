@@ -4,9 +4,9 @@ const { executeActions } = require('../actions')
 // Add new trigger types here by mapping a name to its handler module.
 const registry = {
   playerRadius: require('./playerRadius'),
-  blockNearby : require('./blockNearby'),
-  onSpawn     : require('./onSpawn'),
-  onInterval  : require('./onInterval'),
+  blockNearby: require('./blockNearby'),
+  onSpawn: require('./onSpawn'),
+  onInterval: require('./onInterval'),
 }
 
 // ─── createTriggerRegistry ────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ const registry = {
 
 function createTriggerRegistry() {
   let running = false
-  const queue    = []   // { priority, label, fn }
+  const queue = []   // { priority, label, fn }
   const cleanups = []   // cancel() functions returned by trigger handlers
 
   // Drains the queue, highest-priority first, one chain at a time.
@@ -68,7 +68,7 @@ function createTriggerRegistry() {
       return
     }
 
-    const label    = triggerConfig.type
+    const label = triggerConfig.type
     const priority = triggerConfig.priority ?? 0
 
     // fire() is the bridge between a trigger and its action stack.
@@ -133,7 +133,13 @@ function createTriggerRegistry() {
     }
 
     // handler() may return { cancel() } to clean up its interval/timer on session end
-    const cleanup = handler(bot, triggerConfig.options || {}, fire)
+    // Forward trigger-level baseZone into handlerOptions so handlers with internal
+    // state machines (e.g. playerRadius panic watch) can respect it independently
+    // of the fire() guard — without having to duplicate the check in profiles.
+    const handlerOptions = triggerConfig.baseZone != null
+      ? { ...(triggerConfig.options || {}), baseZone: triggerConfig.baseZone }
+      : (triggerConfig.options || {})
+    const cleanup = handler(bot, handlerOptions, fire)
     if (cleanup?.cancel) cleanups.push(cleanup.cancel)
 
     bot.log.info(`[TRIGGER] Registered "${label}" (priority ${priority})`)

@@ -28,6 +28,7 @@ function register(bot, options, fire) {
     panicIntervalMs = 100,
     whitelist = [],
     blacklist = [],
+    baseZone = null,   // forwarded from triggerConfig.baseZone by registerTrigger
   } = options
 
   // Normalise lists to lower-case sets for O(1) lookup
@@ -48,6 +49,13 @@ function register(bot, options, fire) {
 
   function distTag(username) {
     return isWhitelisted(username) ? '[WL]' : isBlacklisted(username) ? '[BL]' : '    '
+  }
+
+  // Returns false when the bot is outside its declared base zone.
+  // If baseZone is not configured (or bot._base is not yet set), always returns true.
+  function isInBaseZone() {
+    if (!baseZone || !bot._base || !bot.entity?.position) return true
+    return bot.entity.position.distanceTo(bot._base) <= baseZone.radius
   }
 
   // ── Shared emergency disconnect (used by both blacklist and panic watch) ────
@@ -80,7 +88,7 @@ function register(bot, options, fire) {
     const currentNames = new Set()
 
     for (const entity of visible) {
-      const p    = entity.position
+      const p = entity.position
       const posKey = `${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`
       currentNames.add(entity.username)
 
@@ -114,10 +122,10 @@ function register(bot, options, fire) {
     if (!closestInAlert) return
 
     const distance = bot.entity.position.distanceTo(closestInAlert.position)
-    bot._alertTime = Date.now()
 
     if (isBlacklisted(closestInAlert.username)) {
       // Blacklisted player — skip action queue, panic immediately
+      bot._alertTime = Date.now()
       bot.log.warn(
         `[TRIGGER] BLACKLIST ALERT — ${closestInAlert.username} within ${alertRadius} blocks ` +
         `(${distance.toFixed(2)} m) — panicking immediately`,
@@ -127,9 +135,29 @@ function register(bot, options, fire) {
       return
     }
 
+    // Outside base zone — suppress the entire alert response so the bot never
+    // arms the panic watch while it's been teleported away by server maintenance
+    // or similar events. The slow interval keeps running so detection resumes
+    // automatically once the bot returns to base.
+    if (!isInBaseZone()) {
+      const baseDist = bot._base
+        ? bot.entity.position.distanceTo(bot._base).toFixed(1)
+        : '?'
+      bot.log.info(
+        `[TRIGGER] "${closestInAlert.username}" at alertRadius but bot is outside base zone ` +
+        `(${baseDist} m from base, limit ${baseZone.radius}) — alert suppressed`,
+      )
+      return
+    }
+
     // Normal (unlisted) player — fire action stack + arm panic watch
+    bot._alertTime = Date.now()
     alerted = true
     clearInterval(slowInterval)
+
+    // Signal any running background action (survey etc.) to abort at its next
+    // checkpoint so the sweep can dequeue and start as soon as possible.
+    bot._sweepPending = true
 
     bot.log.warn(
       `[TRIGGER] ALERT — ${closestInAlert.username} within ${alertRadius} blocks ` +
