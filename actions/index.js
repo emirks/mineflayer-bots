@@ -13,6 +13,10 @@ const registry = {
   logSurroundings: require('./logSurroundings'),
   surveySpawners: require('./surveySpawners'),
   debugSpawnerWindow: require('./debugSpawnerWindow'),
+  debugTraderWindows: require('./debugTraderWindows'),
+  traverseShop: require('./traverseShop'),
+  deliverOrder: require('./deliverOrder'),
+  blazeTradeLoop: require('./blazeTradeLoop'),
   boneSweep: require('./boneSweep'),
 }
 
