@@ -55,6 +55,12 @@ module.exports = {
     },
     viewer: { ...base.viewer, port: 3004 },
 
+    healthCheck: {
+        intervalMs: 10_000,
+        jitterMs: 10,
+        pingCommand: '/ping',
+    },
+
     triggers: [
         {
             // Start the trade loop 3 s after spawn so chunk data is loaded.
