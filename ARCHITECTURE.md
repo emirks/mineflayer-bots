@@ -721,6 +721,7 @@ vec3i16 scale:  raw_i16 ÷ 8000 = blocks/tick
 | `sentinel` | 3000 | `onSpawn`(+10s) + `onInterval`(5min) + `playerRadius` | Survey spawners at startup (caches `bot._spawnerSurvey`); on alert: sentinelSweep + disconnect |
 | `debug` | 3002 | `onSpawn` | Send `/skyblock` then print all nearby blocks + entities every 5 s |
 | `trader` | 3001 | `onSpawn` + `blockNearby` + `playerRadius` | Warp to market → loot chest → sell → pick up drops; panic-disconnect on player |
+| `debug_collectorder` | 3005 | `onSpawn` | One-shot `collectOrder`: `/order` → YOUR ORDERS → item slot → COLLECT → flatten stack across empty slots |
 
 Single bot:  `node bot.js sentinel` | `node bot.js debug` | `node bot.js trader`
 Multi-bot:   `node orchestrator.js sentinel trader`  (auto-reconnect, shared EventBus)
