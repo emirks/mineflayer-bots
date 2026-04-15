@@ -18,6 +18,7 @@ const registry = {
   deliverOrder: require('./deliverOrder'),
   blazeTradeLoop: require('./blazeTradeLoop'),
   boneSweep: require('./boneSweep'),
+  collectOrder: require('./collectOrder'),
 }
 
 // Runs an ordered list of action configs sequentially.
