@@ -20,6 +20,7 @@ const registry = {
   boneSweep: require('./boneSweep'),
   collectOrder: require('./collectOrder'),
   sellAuction: require('./sellAuction'),
+  auctionOrderLoop: require('./auctionOrderLoop'),
 }
 
 // Runs an ordered list of action configs sequentially.
