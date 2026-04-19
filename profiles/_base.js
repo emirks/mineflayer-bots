@@ -13,7 +13,9 @@ module.exports = {
     host: 'donutsmp.net',
     port: 25565,
     auth: 'microsoft',   // 'offline' | 'microsoft'
-    version: '1.20.4',      // false = auto-detect; or pin e.g. '1.21.1'
+    version: '1.21.1',       // DonutSMP native version (ViaVersion translates if needed).
+                             // Use false to auto-detect (resolves to minecraft-protocol default, currently 1.21.11).
+                             // Check [SESSION] log "version: X" on first login to confirm what is negotiated.
   },
 
   // ── Skills fine-tuning ──────────────────────────────────────────────────────
