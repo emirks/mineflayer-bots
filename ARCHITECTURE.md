@@ -9,16 +9,17 @@
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════╗
-║  DonutSMP GAME SERVER  —  Minecraft 1.21.x                                     ║
+║  DonutSMP GAME SERVER  —  Minecraft 1.21.1                                     ║
 ║  Paper / Spigot  ·  custom plugins  ·  50 000 players                          ║
 ╚══════════════════════════════════════╤═════════════════════════════════════════╝
-                                       │  1.21.x binary protocol
+                                       │  1.21.1 binary protocol
                                        ▼
 ╔══════════════════════════════════════════════════════════════════════════════════╗
 ║  VIAVERSION / VELOCITY PROXY  (DonutSMP infra — not your code)                 ║
-║  Translates protocol on-the-fly                                                 ║
-║    bot version:'1.20.4'  →  proxy speaks 1.20.4 back to your bot               ║
-║    bot version:false     →  proxy speaks native 1.21.x                          ║
+║  Translates protocol on-the-fly; DonutSMP accepts any client version            ║
+║    bot version:'1.21.1'  →  proxy speaks 1.21.1 natively (no translation)      ║
+║    bot version:false     →  minecraft-protocol default (1.21.11); ViaVersion    ║
+║                              translates 1.21.1 → 1.21.11 for the client        ║
 ╚══════════════════════════════════════╤═════════════════════════════════════════╝
                                        │  TCP/IP  ·  AES-128-CFB8 (post-login)
                                        │           ·  zlib compressed (~256 B threshold)
@@ -88,7 +89,7 @@
 ║ │             bot.entities[id]    every loaded entity in render distance    │    ║
 ║ │             bot.players[name]   tablist + entity reference                │    ║
 ║ │             bot.inventory       your slots  (items(), findInventoryItem)  │    ║
-║ │             bot.username / bot.version / bot._client                      │    ║
+║ │             bot.username / bot.version (negotiated, '1.21.1') / bot._client │   ║
 ║ │  World      bot.findBlocks(opts)          bot.blockAt(vec3)               │    ║
 ║ │             bot.nearestEntity(pred)                                        │    ║
 ║ │  Action     bot.chat(msg)                 bot.quit()                      │    ║
@@ -127,7 +128,7 @@
 ║ │ │                                                                     │ │    ║
 ║ │ │  _base.js (shared — spread into every profile)                     │ │    ║
 ║ │ │    bot:   host:donutsmp.net · port:25565 · auth:'microsoft'        │ │    ║
-║ │ │           version:'1.20.4' · profilesFolder:./auth-cache           │ │    ║
+║ │ │           version:'1.21.1' · profilesFolder:./auth-cache           │ │    ║
 ║ │ │    skills: blockPlaceDelay:0                                        │ │    ║
 ║ │ │    viewer: enabled:true · port:3000 · firstPerson:false            │ │    ║
 ║ │ │    protocolDebug: enabled:false · logFile · onlyPacketNames        │ │    ║
@@ -652,9 +653,11 @@ profile.triggers[n]  │  type: 'playerRadius'                                  
 ## 5 · The Velocity Bug — Root Cause & Fix
 
 ```
-minecraft-data (packet schema for 1.20.4):
+minecraft-data packet_entity_velocity schema (1.20.4 through 1.21.x — UNCHANGED):
+  Verified: 1.20.4, 1.21.1, 1.21.4, 1.21.11 all use the same schema.
+  entityVelocityIsLpVec3 feature flag = false for all these versions.
 
-  entity_velocity = {
+  packet_entity_velocity = {
     entityId: varint,
     velocity: vec3i16        ← decoded as NESTED object { x, y, z }
   }
@@ -688,6 +691,7 @@ lib/velocityPatch.js FIX:
   ← prependListener = runs BEFORE entities.js handler
   ← modifies packet object in-place
   ← mineflayer then reads .velocityX correctly → ÷ 8000 → -0.078
+  ← patch is defensive: no-op if velocityX already present (safe for future mineflayer fixes)
 
   Same fix applied to 'spawn_entity' (includes initial velocity at spawn).
 
