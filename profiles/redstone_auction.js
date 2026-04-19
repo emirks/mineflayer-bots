@@ -41,13 +41,13 @@ const base = require('./_base')
 
 const LOOP_OPTIONS = {
     // ── Item ─────────────────────────────────────────────────────────────────
-    itemName: 'redstone',
-    searchTerm: 'redstone dust',   // argument passed to /ah <searchTerm>
+    itemName: 'redstone_block',
+    searchTerm: 'block of redstone',   // argument passed to /ah <searchTerm>
     orderCommand: '/order',          // command that opens the order GUI
 
     // ── Price ─────────────────────────────────────────────────────────────────
     decrementAmount: 10,                // $ to undercut the lowest listing by
-    minPriceFloor: 3000,             // never list below $2 500 per redstone dust
+    minPriceFloor: 4000,             // never list below $2 500 per redstone dust
 
     // ── GUI timings ───────────────────────────────────────────────────────────
     winTimeoutMs: 8000,              // ms to wait for each GUI window to open
