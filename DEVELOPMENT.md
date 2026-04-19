@@ -1,5 +1,6 @@
 To-Do's and features to add:
 
+
 - [x] A good logging system
   - [x] Per-bot file output → `logs/<profileName>.log` (timestamped, plain text)
   - [x] Coloured console output — bot name tag colour-coded per bot (multi-bot readable)
@@ -16,6 +17,19 @@ To-Do's and features to add:
 - [x] Multi-bot system
   - [x] Add dynamic profile selection for orchestrator, instead of taking as an argument, make it ask when it opens up.
   - [ ] Inter-bot communication or orchestration (e.g. complementary spawner sets; intruder warns other bot)
+
+
+### Order & Auction Bot
+- [ ] Logging
+  - [ ] Log money/min for last minute too. One averaged and one for last min
+- [ ] Smart trading mechanism
+  - [ ] Make a research on the nice mechanism
+  - [ ] Evaluate the current mechanism
+  - [ ] How to place auctions?
+  - [ ] Auto-withdraw Auctions?
+- [ ] Send the money gained after a threshold to our main user with "/pay nickname 13M" ragularly.
+- [ ] Auto-Disconnect and Reconnect within an interval, wait some time for the market to stabilize? or handle this in the smart trading mechanism? Because now we disrupt it.
+
 
 ### Sentinel: 
   - [x] Define base first; normal behavior near base, freeze actions away from base (maintenance / player gathers)
@@ -43,35 +57,4 @@ To-Do's and features to add:
 - [ ] AFK avoidance - random movements etc
 
 - [ ] Handle non-intentional disconnection logic like closing viewer
-### The following error crashesthe orchestrator as a whole!
- health: ? | food: ?
-2026-04-07 22:37:28.422 INFO  [sentinel] [SESSION] Base recorded at (-202388.8, -50.0, 10610.7)
-2026-04-07 22:37:28.430 INFO  [sentinel] [SESSION] Viewer → http://localhost:3000
-2026-04-07 22:37:28.431 INFO  [sentinel] [SESSION] Registering 1 trigger(s)...
-2026-04-07 22:37:28.432 INFO  [sentinel] [TRIGGER] Registered "playerRadius" (priority 0)      
-node:events:496
-      throw er; // Unhandled 'error' event
-      ^
 
-Error: listen EADDRINUSE: address already in use :::3000
-    at Server.setupListenHandle [as _listen2] (node:net:1908:16)
-    at listenInCluster (node:net:1965:12)
-    at Server.listen (node:net:2067:7)
-    at module.exports (C:\Users\EmirKISA\Desktop\workspace\personal_projects\mine-automation\mineflayer-bots\node_modules\.pnpm\prismarine-viewer@1.33.0\node_modules\prismarine-viewer\lib\mineflayer.js:81:8)
-    at EventEmitter.<anonymous> (C:\Users\EmirKISA\Desktop\workspace\personal_projects\mine-automation\mineflayer-bots\lib\createBotSession.js:107:7)
-    at Object.onceWrapper (node:events:632:28)
-    at EventEmitter.emit (node:events:530:35)
-    at Client.<anonymous> (C:\Users\EmirKISA\Desktop\workspace\personal_projects\mine-automation\mineflayer-bots\node_modules\.pnpm\mineflayer@4.37.0\node_modules\mineflayer\lib\plugins\health.js:13:11)
-    at Object.onceWrapper (node:events:633:26)
-    at Client.emit (node:events:530:35)
-Emitted 'error' event on Server instance at:
-    at emitErrorNT (node:net:1944:8)
-    at process.processTicksAndRejections (node:internal/process/task_queues:82:21) {
-  code: 'EADDRINUSE',
-  errno: -4091,
-  syscall: 'listen',
-  address: '::',
-  port: 3000
-}
-
-Node.js v20.18.3
