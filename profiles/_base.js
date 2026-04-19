@@ -37,7 +37,7 @@ module.exports = {
   healthCheck: {
     enabled: true,
     intervalMs: 300_000,   // base interval: 5 minutes
-    jitterMs:    30_000,   // ±30 s random offset — avoids perfectly mechanical cadence
+    jitterMs: 30_000,   // ±30 s random offset — avoids perfectly mechanical cadence
     pingCommand: '/ping',  // null = log-only (no command sent)
   },
 
