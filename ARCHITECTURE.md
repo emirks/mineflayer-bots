@@ -132,6 +132,7 @@
 ║ │ │    skills: blockPlaceDelay:0                                        │ │    ║
 ║ │ │    viewer: enabled:true · port:3000 · firstPerson:false            │ │    ║
 ║ │ │    protocolDebug: enabled:false · logFile · onlyPacketNames        │ │    ║
+║ │ │    stateSnapshots: enabled:true → snapshots.jsonl (1/s)            │ │    ║
 ║ │ │                                                                     │ │    ║
 ║ │ │  sentinel.js        debug.js           trader.js                   │ │    ║
 ║ │ │  spread _base       spread _base        spread _base               │ │    ║
@@ -347,6 +348,8 @@
 ║ │ │                       │  │    logs/<name>/<YYYY-MM-DD>/run_<N>/   │  │    ║
 ║ │ │                       │  │      session.log    ← text events       │  │    ║
 ║ │ │                       │  │      snapshots.jsonl ← 1 obj/sec       │  │    ║
+║ │ │                       │  │        (omitted if stateSnapshots.      │  │    ║
+║ │ │                       │  │         enabled is false on profile)    │  │    ║
 ║ │ │                       │  │  run_N increments per process start;   │  │    ║
 ║ │ │                       │  │  reconnects share the same run dir.    │  │    ║
 ║ │ │                       │  └─────────────────────────────────────────┘  │    ║
@@ -386,12 +389,13 @@
 ║ │ │  ⑥ mc.init(bot)  → loadPlugin(pathfinder+collectblock)           │ │    ║
 ║ │ │  ⑦ { registerTrigger, stopAll } = createTriggerRegistry()        │ │    ║
 ║ │ │     ← per-session; isolated queue + cleanup handles               │ │    ║
-║ │ │  ⑧ snapshots = createSnapshotWriter(log.runDir)                  │ │    ║
-║ │ │     ← opens snapshots.jsonl in the run directory                  │ │    ║
+║ │ │  ⑧ if profile.stateSnapshots.enabled ≠ false:                     │ │    ║
+║ │ │       snapshots = createSnapshotWriter(log.runDir)                │ │    ║
+║ │ │       else no writer (no snapshots.jsonl)                         │ │    ║
 ║ │ │  ⑨ bot.once('spawn'):                                             │ │    ║
 ║ │ │       mineflayerViewer(bot, ...) if viewer.enabled                │ │    ║
 ║ │ │       for cfg of profile.triggers: registerTrigger(bot, cfg)      │ │    ║
-║ │ │       setInterval(1000) → buildSnapshot(bot) → snapshots.write()  │ │    ║
+║ │ │       if snapshots: setInterval(1000) → buildSnapshot → write      │ │    ║
 ║ │ │         buildSnapshot: see lib/snapshot.js for full field list     │ │    ║
 ║ │ │  ⑩ promise = new Promise((resolve, reject) => {                  │ │    ║
 ║ │ │       bot.on('login')   → log                                     │ │    ║
