@@ -3,26 +3,32 @@
 // Production bot: collect redstone from /order, auction-sell all of it, repeat.
 //
 // Full flow (loops indefinitely):
+//   0a. Every scheduledRestartMs (1 h): idle restartIdleMs (5 min) → bot.quit()
+//         BotManager reconnects automatically; new session starts fresh.
+//   0b. Every payIntervalMs (10 min): /pay Raikuuru <earnedSinceLastPay>
 //   onSpawn (+5 s)
 //     └─ auctionOrderLoop:
-//          ┌─ inventory has redstone?
+//          ┌─ inventory has redstone block?
 //          │    YES → auctionSellAll
-//          │           ① /ah redstone dust → sort Lowest Price → read floor price
-//          │           ② if computed price < minPriceFloor → stop sell, go collect
+//          │           ① /ah block of redstone → sort Lowest Price → read floor price
+//          │               (retried up to 3× / 5s if AH window fails)
+//          │           ② if computed price < minPriceFloor → exitReason='priceFloor'
+//          │                → retry sell immediately (auto-withdraw planned for future)
 //          │           ③ fillHotbarWith1x (mode=2 swaps, close_window after)
 //          │           ④ for each hotbar slot: equip → /ah sell → confirm lime glass
 //          │                on limit chat → block until sale frees a slot, retry same slot
+//          │                on limit timeout (5 min) → retry sell immediately
 //          │           repeat ①–④ until inventory empty
 //          │    NO  → collectFromMyOrder
-//          │           /order → YOUR ORDERS → redstone → COLLECT → shift-click 1 stack
+//          │           /order → YOUR ORDERS → redstone block → COLLECT → shift-click 1 stack
 //          │           flattenInventoryStack (spread into empty slots)
 //          │           if no stock in order → wait retryCollectMs, retry
 //          └─ sleep loopDelayMs → back to top
 //
 // Price floor:
-//   minPriceFloor: 2500  →  if the market's lowest price − decrementAmount < $2 500,
-//   the bot stops listing for this batch and goes to the collect phase instead.
-//   This prevents the bot from listing at a loss during a dump.
+//   minPriceFloor: 4000  →  if the market's lowest price − decrementAmount < $4 000,
+//   the sell phase exits immediately and retries on the next cycle.
+//   Auto-auction-withdraw for persistent floor situations is planned.
 //
 // Safety:
 //   playerRadius — immediate disconnect if a non-whitelisted player comes within
@@ -47,7 +53,7 @@ const LOOP_OPTIONS = {
 
     // ── Price ─────────────────────────────────────────────────────────────────
     decrementAmount: 10,                // $ to undercut the lowest listing by
-    minPriceFloor: 4000,             // never list below $2 500 per redstone dust
+    minPriceFloor: 4000,             // never list below $4 000 per redstone block
 
     // ── GUI timings ───────────────────────────────────────────────────────────
     winTimeoutMs: 8000,              // ms to wait for each GUI window to open
@@ -58,11 +64,20 @@ const LOOP_OPTIONS = {
 
     // ── Auction-limit handling ────────────────────────────────────────────────
     saleWaitTimeoutMs: 300_000,          // max ms to wait for a sale when limit hit (5 min)
+                                         // on timeout: sell phase retries immediately
 
     // ── Collect / loop ────────────────────────────────────────────────────────
     flattenDelayMs: 10,               // delay between flatten (spread) clicks
     loopDelayMs: 2000,             // pause after collecting before starting sell
     retryCollectMs: 30_000,           // wait if order has no stock yet (30 s)
+
+    // ── Scheduled restart ─────────────────────────────────────────────────────
+    scheduledRestartMs: 3_600_000,       // restart session after 1 h of uptime
+    restartIdleMs: 300_000,              // idle 5 min before disconnecting (bot stays connected)
+
+    // ── Periodic /pay ─────────────────────────────────────────────────────────
+    payPlayerName: 'Raikuuru',           // null to disable; sends /pay every payIntervalMs
+    payIntervalMs: 600_000,              // 10 min between /pay commands
 
     // ── Debug ─────────────────────────────────────────────────────────────────
     // Set to true to log all window slots and write JSON dump files to logs/run_N/.

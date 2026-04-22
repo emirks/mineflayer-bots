@@ -4,19 +4,26 @@
 // (Same machinery as redstone_auction.js — different LOOP_OPTIONS.)
 //
 // Full flow (loops indefinitely):
+//   0a. Every scheduledRestartMs (1 h): idle restartIdleMs (5 min) → bot.quit()
+//         BotManager reconnects automatically; new session starts fresh.
+//   0b. Every payIntervalMs (10 min): /pay Raikuuru <earnedSinceLastPay>
 //   onSpawn (+5 s)
 //     └─ auctionOrderLoop:
 //          ┌─ inventory has hopper?
 //          │    YES → auctionSellAll
-//          │           ① /ah hopper → sort Lowest Price → read floor price
-//          │           ② if computed price < minPriceFloor → stop sell, go collect
+//          │           ① /ah hoppers → sort Lowest Price → read floor price
+//          │               (retried up to 3× / 5s if AH window fails)
+//          │           ② if computed price < minPriceFloor → exitReason='priceFloor'
+//          │                → retry sell immediately (auto-withdraw planned for future)
 //          │           ③ fillHotbarWith1x …  ④ /ah sell … confirm
+//          │                on limit timeout (5 min) → retry sell immediately
 //          │    NO  → collectFromMyOrder
 //          │           /order → YOUR ORDERS → hopper → COLLECT → …
 //          └─ sleep loopDelayMs → repeat
 //
 // Price floor:
-//   minPriceFloor is dollars per hopper. Tune to your margin (screenshot showed ~$1.5K each).
+//   minPriceFloor is dollars per hopper. Tune to your margin.
+//   On floor hit the sell phase retries immediately — auto-withdraw planned for future.
 //
 // Run:
 //   node orchestrator.js redstone_auction_2
@@ -44,11 +51,20 @@ const LOOP_OPTIONS = {
 
     // ── Auction-limit handling ────────────────────────────────────────────────
     saleWaitTimeoutMs: 300_000,          // max ms to wait for a sale when limit hit (5 min)
+                                         // on timeout: sell phase retries immediately
 
     // ── Collect / loop ────────────────────────────────────────────────────────
     flattenDelayMs: 10,               // delay between flatten (spread) clicks
     loopDelayMs: 2000,             // pause after collecting before starting sell
     retryCollectMs: 30_000,           // wait if order has no stock yet (30 s)
+
+    // ── Scheduled restart ─────────────────────────────────────────────────────
+    scheduledRestartMs: 3_600_000,       // restart session after 1 h of uptime
+    restartIdleMs: 300_000,              // idle 5 min before disconnecting (bot stays connected)
+
+    // ── Periodic /pay ─────────────────────────────────────────────────────────
+    payPlayerName: 'Raikuuru',           // null to disable; sends /pay every payIntervalMs
+    payIntervalMs: 600_000,              // 10 min between /pay commands
 
     // ── Debug ─────────────────────────────────────────────────────────────────
     // Set to true to log all window slots and write JSON dump files to logs/run_N/.
@@ -63,7 +79,7 @@ module.exports = {
         username: 'your.second.account@example.com',
         profilesFolder: './auth-cache/redstone_auction_2',
     },
-    viewer: { ...base.viewer, port: 3007 },
+    viewer: { ...base.viewer, port: 3008 },
 
     triggers: [
         {
