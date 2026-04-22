@@ -7,3 +7,7 @@ dist/
 # Local scratch / one-off patch scripts (not part of the project)
 _patch_*
 *.bak
+
+# Ad-hoc API / probe dumps
+swagger-probe.json
+tmp-*.json
