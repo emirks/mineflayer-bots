@@ -14,8 +14,8 @@ module.exports = {
     port: 25565,
     auth: 'microsoft',   // 'offline' | 'microsoft'
     version: '1.21.1',       // DonutSMP native version (ViaVersion translates if needed).
-                             // Use false to auto-detect (resolves to minecraft-protocol default, currently 1.21.11).
-                             // Check [SESSION] log "version: X" on first login to confirm what is negotiated.
+    // Use false to auto-detect (resolves to minecraft-protocol default, currently 1.21.11).
+    // Check [SESSION] log "version: X" on first login to confirm what is negotiated.
   },
 
   // ── Skills fine-tuning ──────────────────────────────────────────────────────
@@ -29,6 +29,14 @@ module.exports = {
     enabled: false,
     port: 3000,
     firstPerson: false,
+  },
+
+  // ── Periodic state snapshots (snapshots.jsonl) ────────────────────────────
+  // When enabled, lib/createBotSession appends one JSON line per second to
+  // logs/<profile>/<date>/run_<N>/snapshots.jsonl (see lib/snapshot.js).
+  // Set enabled: false to skip the file and the 1 Hz buildSnapshot work.
+  stateSnapshots: {
+    enabled: false,
   },
 
   // ── Health heartbeat ────────────────────────────────────────────────────────
