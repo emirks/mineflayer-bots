@@ -21,14 +21,20 @@ To-Do's and features to add:
 
 ### Order & Auction Bot
 - [ ] Logging
-  - [ ] Log money/min for last minute too. One averaged and one for last min
+  - [x] Log money/min for last minute too. One averaged and one for last min
+
 - [ ] Smart trading mechanism
   - [ ] Make a research on the nice mechanism
   - [ ] Evaluate the current mechanism
   - [ ] How to place auctions?
   - [ ] Auto-withdraw Auctions?
-- [ ] Send the money gained after a threshold to our main user with "/pay nickname 13M" ragularly.
-- [ ] Auto-Disconnect and Reconnect within an interval, wait some time for the market to stabilize? or handle this in the smart trading mechanism? Because now we disrupt it.
+
+- [x] Send the money gained after a threshold to our main user with "/pay nickname 13M" ragularly.
+  - [ ] Get the money earned with /bal command, not sum up manually! Check the summing mechanism against that!
+- [x] Auto-Disconnect and Reconnect within an interval, wait some time for the market to stabilize? or handle this in the smart trading mechanism? Because now we disrupt it.
+
+- [ ] Integrate donut.auction or donut flip api! Reason on how to use that!
+
 
 
 ### Sentinel: 
