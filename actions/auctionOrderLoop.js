@@ -1,34 +1,41 @@
 // ── auctionOrderLoop — collect-from-order + auction-sell, indefinitely ─────────
 //
 // Infinite loop that alternates between collecting one stack from the /order
-// GUI and selling all of it via /ah, stopping only when bot._quitting is set.
+// GUI and selling all of it via /ah, stopping only when bot._quitting is set
+// or the scheduled restart fires.
 //
 // Full flow per cycle:
-//   1. Check inventory for itemName
-//        if found  → auctionSellAll() (runs until inventory empty or price floor hit)
-//        if empty  → collectFromMyOrder() (shift-clicks one stack from order page)
-//                     if nothing to collect → wait retryCollectMs, retry
-//   2. sleep loopDelayMs → back to 1
-//
-// The sell phase handles auction-limit blocking and per-sale retries internally.
-// This action never returns while the bot is alive.
+//   0a. Scheduled restart: if uptime >= scheduledRestartMs
+//         idle restartIdleMs (bot stays connected, no GUI), then bot.quit()
+//         BotManager sees unexpected end → reconnects automatically
+//   0b. Periodic /pay: if payPlayerName set + payIntervalMs elapsed
+//         /pay <payPlayerName> <floor(earnedSinceLastPay)>
+//   1.  Check inventory for itemName
+//         found  → auctionSellAll()  (retries immediately on priceFloor/limit/noPrice)
+//         empty  → collectFromMyOrder()  (one stack + flatten into 1× per slot)
+//                   if no stock → wait retryCollectMs, retry
+//   2.  sleep loopDelayMs → back to 0
 //
 // Options (all optional — defaults shown):
-//   itemName          {string}  'redstone'      Minecraft item ID
-//   searchTerm        {string}  'redstone dust' /ah search argument
-//   orderCommand      {string}  '/order'        command that opens the order GUI
-//   decrementAmount   {number}  10              $ to undercut lowest listing by
-//   minPriceFloor     {number}  0               stop listing if price < floor (0 = off)
-//   winTimeoutMs      {number}  8000            ms to wait for each GUI window
-//   clickDelayMs      {number}  600             settle delay after GUI clicks
-//   fillDelayMs       {number}  200             delay between hotbar-fill swap clicks
-//   settleAfterFillMs {number}  1500            settle after hotbar fill
-//   sellIntervalMs    {number}  800             delay between successive /ah sell cmds
-//   saleWaitTimeoutMs {number}  300_000         max wait for a sale when limit hit
-//   flattenDelayMs    {number}  10              delay between flatten clicks
-//   loopDelayMs       {number}  2000            pause after each collect before selling
-//   retryCollectMs    {number}  30_000          wait if order has no stock (30 s)
-//   debug             {boolean} false           log window dumps + write JSON files
+//   itemName           {string}   'redstone'       Minecraft item ID
+//   searchTerm         {string}   'redstone dust'  /ah search argument
+//   orderCommand       {string}   '/order'         command that opens the order GUI
+//   decrementAmount    {number}   10               $ to undercut lowest listing by
+//   minPriceFloor      {number}   0                stop listing if price < floor (0 = off)
+//   winTimeoutMs       {number}   8000             ms to wait for each GUI window
+//   clickDelayMs       {number}   600              settle delay after GUI clicks
+//   fillDelayMs        {number}   200              delay between hotbar-fill swap clicks
+//   settleAfterFillMs  {number}   1500             settle after hotbar fill
+//   sellIntervalMs     {number}   800              delay between successive /ah sell cmds
+//   saleWaitTimeoutMs  {number}   300_000          max wait for a sale when limit hit (5 min)
+//   flattenDelayMs     {number}   10               delay between flatten clicks
+//   loopDelayMs        {number}   2000             pause after each collect before selling
+//   retryCollectMs     {number}   30_000           wait if order has no stock (30 s)
+//   scheduledRestartMs {number}   3_600_000        restart session after this uptime (1 h)
+//   restartIdleMs      {number}   300_000          idle before disconnect during restart (5 min)
+//   payPlayerName      {string}   null             /pay target username (null = feature off)
+//   payIntervalMs      {number}   600_000          interval between /pay commands (10 min)
+//   debug              {boolean}  false            log window dumps + write JSON files
 
 const { auctionSellAll, formatMoney } = require('../lib/skills/auctionSell')
 const { collectFromMyOrder }          = require('../lib/skills/collectMyOrder')
@@ -36,44 +43,102 @@ const { collectFromMyOrder }          = require('../lib/skills/collectMyOrder')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const LOG = '[AUCTION-ORDER-LOOP]'
 
+// Rolling window size for the "last N minutes" $/min metric.
+const ROLLING_WINDOW_MS = 3 * 60 * 1000   // 3 minutes
+
 module.exports = async function auctionOrderLoop(bot, opts = {}) {
     const {
-        itemName          = 'redstone',
-        searchTerm        = 'redstone dust',
-        orderCommand      = '/order',
-        decrementAmount   = 10,
-        minPriceFloor     = 0,
-        winTimeoutMs      = 8000,
-        clickDelayMs      = 600,
-        fillDelayMs       = 200,
-        settleAfterFillMs = 1500,
-        sellIntervalMs    = 800,
-        saleWaitTimeoutMs = 300_000,
-        flattenDelayMs    = 10,
-        loopDelayMs       = 2000,
-        retryCollectMs    = 30_000,
-        debug             = false,
+        itemName            = 'redstone',
+        searchTerm          = 'redstone dust',
+        orderCommand        = '/order',
+        decrementAmount     = 10,
+        minPriceFloor       = 0,
+        winTimeoutMs        = 8000,
+        clickDelayMs        = 600,
+        fillDelayMs         = 200,
+        settleAfterFillMs   = 1500,
+        sellIntervalMs      = 800,
+        saleWaitTimeoutMs   = 300_000,
+        flattenDelayMs      = 10,
+        loopDelayMs         = 2000,
+        retryCollectMs      = 30_000,
+        scheduledRestartMs  = 3_600_000,   // 1 h
+        restartIdleMs       = 300_000,     // 5 min idle before disconnect
+        payPlayerName       = null,        // null = /pay feature disabled
+        payIntervalMs       = 600_000,     // 10 min
+        debug               = false,
     } = opts
 
     let cycle = 0
 
-    // Persistent stats shared with every auctionSellAll call this session.
-    // All fields accumulate across collect→sell cycles so the totals are never
-    // zeroed between phases.  startTime stays fixed at session start.
+    // Persistent stats — accumulate across all collect→sell cycles this session.
+    // startTime stays fixed at session start; never reset between phases.
     const runStats = {
-        totalEarned:    0,
-        buyCount:       0,
+        totalEarned:     0,
+        buyCount:        0,
         lastTargetPrice: null,  // anti self-undercut: survives across sell phases
-        startTime:      Date.now(),
+        startTime:       Date.now(),
     }
 
+    // ── Rolling 3-min earnings window ─────────────────────────────────────────
+    // Populated by '_ahSale' events emitted by auctionSell.js per confirmed sale.
+    // We listen here in parallel with the internal auctionSell.js chat watcher.
+    const recentSales = []   // [{ t: Date.now(), amount: number }]
+    function onSale(earned) {
+        recentSales.push({ t: Date.now(), amount: earned })
+    }
+    bot.on('_ahSale', onSale)
+
+    // ── /pay tracking ─────────────────────────────────────────────────────────
+    let lastPayTime   = Date.now()
+    let lastPayEarned = 0   // runStats.totalEarned snapshot at last pay
+
+    // ── Scheduled restart ─────────────────────────────────────────────────────
+    const restartAt = Date.now() + scheduledRestartMs
+
     bot.log.info(
-        `${LOG} ═══ Starting (item:"${itemName}"  floor:${minPriceFloor > 0 ? '$' + minPriceFloor : 'off'}` +
-        `  decrement:${decrementAmount}) ═══`
+        `${LOG} ═══ Starting` +
+        `  item:"${itemName}"` +
+        `  floor:${minPriceFloor > 0 ? '$' + minPriceFloor : 'off'}` +
+        `  decrement:$${decrementAmount}` +
+        `  restart:${(scheduledRestartMs / 60_000).toFixed(0)}m ═══`
     )
 
     while (!bot._quitting) {
         cycle++
+
+        // ── 0a. Scheduled restart ──────────────────────────────────────────────
+        // When uptime reaches scheduledRestartMs the bot idles for restartIdleMs
+        // (stays connected, no GUI), then disconnects without setting bot._quitting.
+        // BotManager sees an unexpected end → RECONNECTING → new session starts.
+        if (Date.now() >= restartAt) {
+            const idleMin = (restartIdleMs / 60_000).toFixed(0)
+            bot.log.info(
+                `${LOG} ═══ Scheduled restart (${(scheduledRestartMs / 60_000).toFixed(0)}m uptime)` +
+                ` — idling ${idleMin}m then disconnecting ═══`
+            )
+            await sleep(restartIdleMs)
+            if (bot._quitting) break   // panic fired during idle — let it handle exit
+            bot.log.info(`${LOG} Disconnect — BotManager will reconnect automatically`)
+            try { bot.pathfinder?.stop?.() } catch {}
+            bot.quit()   // intentional: false → BotManager RECONNECTING
+            break
+        }
+
+        // ── 0b. Periodic /pay ──────────────────────────────────────────────────
+        // Fires at the top of a cycle (no open windows) so the chat command lands
+        // cleanly.  Uses accumulated delta so a missed interval is never lost.
+        if (payPlayerName && Date.now() - lastPayTime >= payIntervalMs) {
+            const delta = Math.floor(runStats.totalEarned - lastPayEarned)
+            if (delta > 0) {
+                bot.log.info(`${LOG} /pay ${payPlayerName} ${delta}  (earned since last pay)`)
+                bot.chat(`/pay ${payPlayerName} ${delta}`)
+                lastPayEarned = runStats.totalEarned
+            } else {
+                bot.log.info(`${LOG} /pay skipped — $0 earned since last pay`)
+            }
+            lastPayTime = Date.now()
+        }
 
         // ── 1. Decide: sell or collect ─────────────────────────────────────────
         const inventoryCount = bot.inventory.items()
@@ -102,15 +167,52 @@ module.exports = async function auctionOrderLoop(bot, opts = {}) {
                     debug,
                     persistedState: runStats,   // accumulates across all sell phases
                 })
-                const elapsedMin   = (Date.now() - runStats.startTime) / 60_000
-                const profitPerMin = elapsedMin > 0 ? runStats.totalEarned / elapsedMin : 0
+
+                // ── Stats log: session rate + rolling 3-min rate ──────────────
+                const now        = Date.now()
+                const elapsedMin = (now - runStats.startTime) / 60_000
+                const sessionRate = elapsedMin > 0 ? runStats.totalEarned / elapsedMin : 0
+
+                // Prune stale entries then sum the rolling window
+                const cutoff = now - ROLLING_WINDOW_MS
+                while (recentSales.length > 0 && recentSales[0].t < cutoff) recentSales.shift()
+                const recentEarned = recentSales.reduce((s, e) => s + e.amount, 0)
+                // Window is capped at 3 min, but use actual elapsed if <3 min into session
+                const windowMins = Math.min(3, elapsedMin)
+                const recentRate = windowMins > 0 ? recentEarned / windowMins : 0
+
                 bot.log.info(
-                    `${LOG} Sell phase done — ${result.totalSold} listed this phase` +
-                    `  |  run total: ${runStats.buyCount} sales` +
+                    `${LOG} Sell phase done (${result.exitReason})` +
+                    `  |  ${result.totalSold} listed this phase` +
+                    `  |  ${runStats.buyCount} total sales` +
                     `  |  ${formatMoney(runStats.totalEarned)} earned` +
-                    `  |  ${formatMoney(profitPerMin)}/min` +
+                    `  |  session: ${formatMoney(sessionRate)}/min` +
+                    `  |  last 3m: ${formatMoney(recentRate)}/min` +
                     `  |  ${elapsedMin.toFixed(1)} min elapsed`
                 )
+
+                // ── Non-normal exits: log and retry immediately ────────────────
+                // priceFloor, limitTimeout, and noPrice all retry the sell phase
+                // on the next cycle without any extra sleep.
+                // Auto-auction-withdraw (planned) will handle persistent floor/limit cases.
+                if (result.exitReason === 'priceFloor') {
+                    bot.log.warn(
+                        `${LOG} Market below floor ${formatMoney(minPriceFloor)} — retrying immediately`
+                    )
+                    continue
+                }
+                if (result.exitReason === 'limitTimeout') {
+                    bot.log.warn(
+                        `${LOG} Auction limit: no sale in ${(saleWaitTimeoutMs / 1000).toFixed(0)}s` +
+                        ` — retrying immediately`
+                    )
+                    continue
+                }
+                if (result.exitReason === 'noPrice') {
+                    bot.log.warn(`${LOG} AH unavailable after retries — retrying immediately`)
+                    continue
+                }
+
             } catch (err) {
                 bot.log.warn(`${LOG} auctionSellAll error — ${err.message}`)
                 await sleep(3000)
@@ -153,5 +255,6 @@ module.exports = async function auctionOrderLoop(bot, opts = {}) {
         }
     }
 
-    bot.log.info(`${LOG} ═══ Loop exiting (bot._quitting) ═══`)
+    bot.removeListener('_ahSale', onSale)
+    bot.log.info(`${LOG} ═══ Loop exiting ═══`)
 }
