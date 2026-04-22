@@ -1,28 +1,25 @@
 <#
 .SYNOPSIS
-  Summarize all redstone_auction* profile logs for one calendar day: every unique sold item gets its own
-  revenue + time + rate metrics, then combined totals.
+  Summarize redstone_auction* logs: three non-overlapping CHAT gain streams + per-item splits + You paid by player.
 
 .DESCRIPTION
-  Discovers logs/redstone_auction* (or use -LogRoots / -LogRoot). Parses [CHAT] lines matching:
-    bought your <Item Name> for $<amount>[K|M|B]
-  Each distinct item name (after trim / collapse spaces) is its own bucket; matching is case-insensitive
-  on the key, and the first-seen spelling is used for labels.
+  Revenue (mutually exclusive per line — classify in this order):
+    1) You earned $X from auction  (optional " while you were away" at end; optional extra text after "from auction")
+    2) <player> bought your <Item> for $X while you were away
+    3) <player> bought your <Item> for $X  (live; no "while you were away")
 
-  Session duration is split across items proportionally to sale-line counts in that session.
-  Sessions with no matching lines accrue to Idle.
+  Also parses: You paid <Player> $X[.]
 
-.PARAMETER LogRoots
-  Explicit log parent folders (each contains dated subfolders).
-
-.PARAMETER LogRoot
-  Single folder (backward compatible).
+  Default: discovers mineflayer-bots/logs/redstone_auction* (relative to this script).
+  With -LogRoot or -LogRoots: each path is a candidate root. If <root>/<DateFolder> does not exist,
+  the script also tries each immediate child directory named redstone_auction* under that root
+  (so e.g. -LogRoot .../logs/vm_logs/logs picks up .../vm_logs/logs/redstone_auction/...).
 
 .PARAMETER DateFolder
-  Day folder name, e.g. 2026-04-19
+  Day folder under each log root, e.g. 2026-04-20
 
 .EXAMPLE
-  powershell -NoProfile -File .\redstone-auction-day-summary.ps1 -DateFolder 2026-04-19 -PerRun
+  powershell -NoProfile -File .\redstone-auction-day-summary.ps1 -DateFolder 2026-04-20
 #>
 [CmdletBinding()]
 param(
@@ -61,6 +58,30 @@ else {
   }
 }
 
+# If -LogRoot(s) point at a parent of profile folders (e.g. vm_logs/logs) rather than
+# redstone_auction itself, expand to child directories matching redstone_auction*.
+$expanded = New-Object System.Collections.Generic.List[string]
+foreach ($r in $resolvedRoots) {
+  $r = [System.IO.Path]::GetFullPath($r)
+  $dp = Join-Path $r $DateFolder
+  if (Test-Path -LiteralPath $dp) {
+    $expanded.Add($r) | Out-Null
+    continue
+  }
+  $subs = @(
+    Get-ChildItem -LiteralPath $r -Directory -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -like 'redstone_auction*' } |
+      Sort-Object Name
+  )
+  if ($subs.Count -gt 0) {
+    foreach ($s in $subs) { $expanded.Add($s.FullName) | Out-Null }
+  }
+  else {
+    $expanded.Add($r) | Out-Null
+  }
+}
+$resolvedRoots = @($expanded)
+
 $dayPaths = @()
 foreach ($r in $resolvedRoots) {
   $dp = Join-Path $r $DateFolder
@@ -77,18 +98,35 @@ if ($dayPaths.Count -eq 0) {
 }
 
 $reSale = [regex]'(?i)\[CHAT\].*?\bbought your\s+(.+?)\s+for\s*\$'
+$reYouEarned = [regex]'(?i)\[CHAT\].*?\bYou earned\s+\$(\d+(?:\.\d+)?)([KMB]?).*?\bfrom auction'
+$reYouPaid = [regex]'(?i)\[CHAT\].*?\bYou paid\s+(.+?)\s+\$(\d+(?:\.\d+)?)([KMB]?)'
 $reMoney = [regex]'\$(\d+(?:\.\d+)?)([KMB]?)'
 $reTs = [regex]'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})'
 $inv = [System.Globalization.CultureInfo]::InvariantCulture
+
+$script:KeyYouEarned = '__you_earned_auction__'
 
 function Normalize-ItemKey([string]$raw) {
   $t = ($raw -replace '\s+', ' ').Trim()
   return $t.ToLowerInvariant()
 }
 
+function Normalize-PayeeKey([string]$raw) {
+  return ($raw -replace '\s+', ' ').Trim().ToLowerInvariant()
+}
+
 function Parse-Money([System.Text.RegularExpressions.Match]$m) {
   $n = [double]$m.Groups[1].Value
   switch ($m.Groups[2].Value) {
+    'K' { return $n * 1000 }
+    'M' { return $n * 1e6 }
+    'B' { return $n * 1e9 }
+    default { return $n }
+  }
+}
+
+function Parse-MoneyGroups([double]$n, [string]$suff) {
+  switch ($suff) {
     'K' { return $n * 1000 }
     'M' { return $n * 1e6 }
     'B' { return $n * 1e9 }
@@ -178,9 +216,9 @@ function Get-Metrics([double]$usd, [double]$sec, [int]$sales) {
   }
 }
 
-function Ensure-GlobalItem([hashtable]$globalItems, [string]$key, [string]$display) {
-  if (-not $globalItems.ContainsKey($key)) {
-    $globalItems[$key] = @{
+function Ensure-Bucket([hashtable]$store, [string]$key, [string]$display) {
+  if (-not $store.ContainsKey($key)) {
+    $store[$key] = @{
       Display = $display
       Usd     = 0.0
       Sales   = 0
@@ -189,25 +227,28 @@ function Ensure-GlobalItem([hashtable]$globalItems, [string]$key, [string]$displ
   }
 }
 
-function Ensure-SourceItem([hashtable]$srcBucket, [string]$key, [string]$display) {
-  $it = $srcBucket.Items
-  if (-not $it.ContainsKey($key)) {
-    $it[$key] = @{
+function Ensure-Payee([hashtable]$store, [string]$key, [string]$display) {
+  if (-not $store.ContainsKey($key)) {
+    $store[$key] = @{
       Display = $display
       Usd     = 0.0
-      Sales   = 0
-      Sec     = 0.0
+      Lines   = 0
     }
   }
 }
 
-# --- global per item key ---
 $items = @{}
 $idleSec = 0.0
 $rows = New-Object System.Collections.Generic.List[object]
-
-# --- per log root: @{ IdleSec; Items = @{ key -> row } } ---
 $bySource = @{}
+
+$paidByPayee = @{}
+$paidTotalUsd = 0.0
+$paidLines = 0
+
+$streamLiveUsd = 0.0; $streamLiveLines = 0
+$streamAwayUsd = 0.0; $streamAwayLines = 0
+$streamEarnedUsd = 0.0; $streamEarnedLines = 0
 
 foreach ($entry in $dayPaths) {
   $srcName = $entry.Name
@@ -215,6 +256,7 @@ foreach ($entry in $dayPaths) {
     $bySource[$srcName] = @{
       IdleSec = 0.0
       Items   = @{}
+      Paid    = @{}
     }
   }
   $srcBucket = $bySource[$srcName]
@@ -231,33 +273,76 @@ foreach ($entry in $dayPaths) {
 
       foreach ($ln in $lines) {
         if ($ln -notmatch '\[CHAT\]') { continue }
+
+        # --- You paid (outflow; by player) ---
+        $pm = $reYouPaid.Match($ln)
+        if ($pm.Success) {
+          $payeeRaw = $pm.Groups[1].Value.Trim()
+          $pk = Normalize-PayeeKey $payeeRaw
+          $pv = Parse-MoneyGroups ([double]$pm.Groups[2].Value) $pm.Groups[3].Value
+          $paidTotalUsd += $pv
+          $paidLines++
+          Ensure-Payee $paidByPayee $pk $payeeRaw
+          $paidByPayee[$pk].Usd += $pv
+          $paidByPayee[$pk].Lines++
+          Ensure-Payee $srcBucket.Paid $pk $payeeRaw
+          $srcBucket.Paid[$pk].Usd += $pv
+          $srcBucket.Paid[$pk].Lines++
+        }
+
+        # --- 1) You earned ... from auction ---
+        $ye = $reYouEarned.Match($ln)
+        if ($ye.Success) {
+          $v = Parse-MoneyGroups ([double]$ye.Groups[1].Value) $ye.Groups[2].Value
+          $streamEarnedUsd += $v
+          $streamEarnedLines++
+          $bk = $script:KeyYouEarned
+          $disp = 'You earned (auction)'
+          Ensure-Bucket $items $bk $disp
+          $items[$bk].Usd += $v
+          $items[$bk].Sales++
+          Ensure-Bucket $srcBucket.Items $bk $disp
+          $srcBucket.Items[$bk].Usd += $v
+          $srcBucket.Items[$bk].Sales++
+          if ($sessionCounts.ContainsKey($bk)) { $sessionCounts[$bk]++ } else { $sessionCounts[$bk] = 1 }
+          continue
+        }
+
+        # --- 2 / 3) bought your ... for $ (away vs live) ---
         $sm = $reSale.Match($ln)
         if (-not $sm.Success) { continue }
 
         $display = ($sm.Groups[1].Value -replace '\s+', ' ').Trim()
         if ([string]::IsNullOrWhiteSpace($display)) { continue }
 
-        $key = Normalize-ItemKey $display
+        $ik = Normalize-ItemKey $display
+        $away = $ln -match 'while you were away'
+        $prefix = if ($away) { 'away' } else { 'live' }
+        $bk = '{0}::{1}' -f $prefix, $ik
+        $baseDisp = ($sm.Groups[1].Value -replace '\s+', ' ').Trim()
+        $disp = if ($away) { '{0} (offline sale)' -f $baseDisp } else { '{0} (live)' -f $baseDisp }
+
         $mm = $reMoney.Match($ln)
         if (-not $mm.Success) { continue }
         $v = Parse-Money $mm
 
-        Ensure-GlobalItem $items $key $display
-
-        $items[$key].Usd += $v
-        $items[$key].Sales++
-
-        Ensure-SourceItem $srcBucket $key $display
-        $srcItem = $srcBucket.Items[$key]
-        $srcItem.Usd += $v
-        $srcItem.Sales++
-
-        if ($sessionCounts.ContainsKey($key)) {
-          $sessionCounts[$key]++
+        if ($away) {
+          $streamAwayUsd += $v
+          $streamAwayLines++
         }
         else {
-          $sessionCounts[$key] = 1
+          $streamLiveUsd += $v
+          $streamLiveLines++
         }
+
+        Ensure-Bucket $items $bk $disp
+        $items[$bk].Usd += $v
+        $items[$bk].Sales++
+        Ensure-Bucket $srcBucket.Items $bk $disp
+        $srcBucket.Items[$bk].Usd += $v
+        $srcBucket.Items[$bk].Sales++
+
+        if ($sessionCounts.ContainsKey($bk)) { $sessionCounts[$bk]++ } else { $sessionCounts[$bk] = 1 }
       }
 
       $w = 0
@@ -307,6 +392,9 @@ $activeSec = 0.0
 foreach ($it in $items.Values) { $activeSec += $it.Sec }
 $grandSec = $activeSec + $idleSec
 
+$totalGainsUsd = $streamLiveUsd + $streamAwayUsd + $streamEarnedUsd
+$totalGainLines = $streamLiveLines + $streamAwayLines + $streamEarnedLines
+
 $totalUsd = 0.0
 $totalSales = 0
 foreach ($it in $items.Values) {
@@ -329,65 +417,86 @@ foreach ($e in $dayPaths) {
 }
 Write-Host ''
 
-Write-Host '--- Process time by item (proportional share per run) + idle ---' -ForegroundColor Yellow
-foreach ($io in $itemOrder) {
-  $r = $io.Row
-  Write-Host ("  {0,-42} {1}  ({2} s)" -f $r.Display, (Format-Hms $r.Sec), ([string]::Format($inv, '{0:N0}', $r.Sec)))
-}
-Write-Host ("  {0,-42} {1}  ({2} s)" -f '(Idle - no tracked CHAT sales)', (Format-Hms $idleSec), ([string]::Format($inv, '{0:N0}', $idleSec)))
-Write-Host ("  {0,-42} {1}  ({2} s)" -f 'ACTIVE (all items)', (Format-Hms $activeSec), ([string]::Format($inv, '{0:N0}', $activeSec))) -ForegroundColor DarkGray
-Write-Host ("  {0,-42} {1}  ({2} s)" -f 'GRAND (active + idle)', (Format-Hms $grandSec), ([string]::Format($inv, '{0:N0}', $grandSec))) -ForegroundColor Green
+Write-Host '--- CHAT revenue streams (disjoint line types) ---' -ForegroundColor Yellow
+Write-Host ("  Live bought your:        {0}  ({1} lines)" -f (Format-Money $streamLiveUsd), ([string]::Format($inv, '{0:N0}', $streamLiveLines)))
+Write-Host ("  Offline bought your:     {0}  ({1} lines)" -f (Format-Money $streamAwayUsd), ([string]::Format($inv, '{0:N0}', $streamAwayLines)))
+Write-Host ("  You earned (auction):    {0}  ({1} lines)" -f (Format-Money $streamEarnedUsd), ([string]::Format($inv, '{0:N0}', $streamEarnedLines)))
+Write-Host ("  TOTAL CHAT gains:        {0}  ({1} lines)" -f (Format-Money $totalGainsUsd), ([string]::Format($inv, '{0:N0}', $totalGainLines))) -ForegroundColor Green
 Write-Host ''
 
-Write-Host '--- CHAT revenue by item ---' -ForegroundColor Yellow
+Write-Host '--- Total sent (You paid) by recipient ---' -ForegroundColor Yellow
+Write-Host ("  All recipients combined: {0}  ({1} lines)" -f (Format-Money $paidTotalUsd), ([string]::Format($inv, '{0:N0}', $paidLines)))
+foreach ($pe in ($paidByPayee.GetEnumerator() | Sort-Object { $_.Value.Usd } -Descending)) {
+  $p = $pe.Value
+  Write-Host ("  {0,-36} {1}  ({2} payments)" -f $p.Display, (Format-Money $p.Usd), $p.Lines)
+}
+Write-Host ''
+
+Write-Host '--- Process time by bucket (proportional to line counts in session) + idle ---' -ForegroundColor Yellow
 foreach ($io in $itemOrder) {
   $r = $io.Row
-  Write-Host ("  {0,-42} {1}  ({2} sales)" -f $r.Display, (Format-Money $r.Usd), ([string]::Format($inv, '{0:N0}', $r.Sales)))
+  Write-Host ("  {0,-48} {1}  ({2} s)" -f $r.Display, (Format-Hms $r.Sec), ([string]::Format($inv, '{0:N0}', $r.Sec)))
 }
-Write-Host ("  {0,-42} {1}  ({2} sales)" -f 'TOTAL', (Format-Money $totalUsd), ([string]::Format($inv, '{0:N0}', $totalSales))) -ForegroundColor Green
+Write-Host ("  {0,-48} {1}  ({2} s)" -f '(Idle - no tracked gain lines)', (Format-Hms $idleSec), ([string]::Format($inv, '{0:N0}', $idleSec)))
+Write-Host ("  {0,-48} {1}  ({2} s)" -f 'ACTIVE (all buckets)', (Format-Hms $activeSec), ([string]::Format($inv, '{0:N0}', $activeSec))) -ForegroundColor DarkGray
+Write-Host ("  {0,-48} {1}  ({2} s)" -f 'GRAND (active + idle)', (Format-Hms $grandSec), ([string]::Format($inv, '{0:N0}', $grandSec))) -ForegroundColor Green
+Write-Host ''
+
+Write-Host '--- CHAT gains by bucket (live / offline item + you earned) ---' -ForegroundColor Yellow
+foreach ($io in $itemOrder) {
+  $r = $io.Row
+  Write-Host ("  {0,-48} {1}  ({2} lines)" -f $r.Display, (Format-Money $r.Usd), ([string]::Format($inv, '{0:N0}', $r.Sales)))
+}
+Write-Host ("  {0,-48} {1}  ({2} lines)" -f 'TOTAL (sum buckets)', (Format-Money $totalUsd), ([string]::Format($inv, '{0:N0}', $totalSales))) -ForegroundColor Green
 Write-Host ''
 
 function Write-MetricsBlock([string]$title, $m) {
   Write-Host $title -ForegroundColor Yellow
   Write-Host ("  Total this calendar day: {0}" -f (Format-Money $m.DayTotalUsd))
-  Write-Host ("  Mean per sale:           {0}" -f (Format-Money $m.MeanPerSaleUsd))
+  Write-Host ("  Mean per line:           {0}" -f (Format-Money $m.MeanPerSaleUsd))
   Write-Host ("  Revenue / minute:        {0}" -f (Format-Money $m.PerMinUsd))
   Write-Host ("  Revenue / hour:          {0}" -f (Format-Money $m.PerHrUsd))
   Write-Host ("  Projected / 24h wall:    {0}  (if `$ / sec stayed constant for this bucket)" -f (Format-Money $m.Projected24hUsd))
   Write-Host ''
 }
 
-Write-Host '--- Per-item rates (time = that item''s share of each session) ---' -ForegroundColor Cyan
+Write-Host '--- Per-bucket rates ---' -ForegroundColor Cyan
 foreach ($io in $itemOrder) {
   $r = $io.Row
   $m = Get-Metrics $r.Usd $r.Sec $r.Sales
   Write-MetricsBlock ("--- {0} ---" -f $r.Display) $m
 }
 
-Write-MetricsBlock '--- ALL ITEMS (active time only; full day revenue) ---' $mActive
-Write-MetricsBlock '--- GRAND (all session wall time incl. idle; full day revenue) ---' $mGrand
+Write-MetricsBlock '--- ALL CHAT GAINS (active time only) ---' $mActive
+Write-MetricsBlock '--- GRAND (all session wall time incl. idle; same CHAT gains) ---' $mGrand
 
-Write-Host '--- By log root (per item + idle) ---' -ForegroundColor Cyan
+Write-Host '--- By log root ---' -ForegroundColor Cyan
 foreach ($sk in ($bySource.Keys | Sort-Object)) {
   $sb = $bySource[$sk]
   Write-Host ("[{0}]" -f $sk) -ForegroundColor DarkCyan
   Write-Host ("  Idle: {0}  ({1} s)" -f (Format-Hms $sb.IdleSec), ([string]::Format($inv, '{0:N0}', $sb.IdleSec)))
+
+  $subGains = 0.0; $subGainLines = 0; $sumItemSec = 0.0
   $srcItems = $sb.Items.GetEnumerator() |
     ForEach-Object { [pscustomobject]@{ Key = $_.Key; R = $_.Value } } |
     Sort-Object { $_.R.Usd } -Descending
   foreach ($si in $srcItems) {
     $r = $si.R
     $m = Get-Metrics $r.Usd $r.Sec $r.Sales
-    Write-Host ("  {0,-36} rev {1,-18} time {2,-12} sales {3,6}  {4}/hr" -f $r.Display, (Format-Money $r.Usd), (Format-Hms $r.Sec), $r.Sales, (Format-Money $m.PerHrUsd))
-  }
-  $subUsd = 0.0; $subSales = 0; $sumItemSec = 0.0
-  foreach ($r in $sb.Items.Values) {
-    $subUsd += $r.Usd
-    $subSales += $r.Sales
+    Write-Host ("  {0,-40} rev {1,-18} time {2,-12} lines {3,6}  {4}/hr" -f $r.Display, (Format-Money $r.Usd), (Format-Hms $r.Sec), $r.Sales, (Format-Money $m.PerHrUsd))
+    $subGains += $r.Usd
+    $subGainLines += $r.Sales
     $sumItemSec += $r.Sec
   }
   $wall = $sumItemSec + $sb.IdleSec
-  Write-Host ("  {0,-36} rev {1,-18} wall {2,-12} sales {3,6}" -f 'SUBTOTAL (this root)', (Format-Money $subUsd), (Format-Hms $wall), $subSales)
+  Write-Host ("  {0,-40} rev {1,-18} wall {2,-12} lines {3,6}  (CHAT gains)" -f 'SUBTOTAL gains', (Format-Money $subGains), (Format-Hms $wall), $subGainLines)
+
+  $subPaid = 0.0; $subPaidLines = 0
+  foreach ($pv in $sb.Paid.Values) {
+    $subPaid += $pv.Usd
+    $subPaidLines += $pv.Lines
+  }
+  Write-Host ("  {0,-40} {1}  ({2} lines)  (You paid out)" -f 'SUBTOTAL paid', (Format-Money $subPaid), $subPaidLines)
   Write-Host ''
 }
 
