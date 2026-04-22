@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-04-22
+- **feat** `profiles/_base.js` — `stateSnapshots: { enabled: false }` (spread into standard profiles) skips `snapshots.jsonl` and the 1 Hz `buildSnapshot` timer; set `enabled: true` to match old always-on behavior. Profiles that omit `stateSnapshots` still default to snapshots on (`createBotSession`: only explicit `enabled: false` disables)
+- **feat** `lib/createBotSession.js` — no snapshot writer / interval when `profile.stateSnapshots.enabled === false`
+- **docs** `ARCHITECTURE.md` — optional periodic snapshots and `_base.stateSnapshots`
+
+## 2026-04-19 (2)
+- **feat** `actions/auctionOrderLoop.js` — scheduled session restart: at `scheduledRestartMs` uptime, idle `restartIdleMs` then `bot.quit()` (not `bot._quitting`) so BotManager reconnects; options on both auction profiles
+- **feat** `actions/auctionOrderLoop.js` — periodic `/pay`: every `payIntervalMs`, `/pay <payPlayerName> <floor(earned since last pay)>` at cycle start; `payPlayerName: null` disables
+- **feat** `actions/auctionOrderLoop.js` — rolling 3-minute $/min from `_ahSale` events; sell-phase log shows `session:` and `last 3m:` rates; `exitReason` in sell summary; immediate retry (same loop) for `priceFloor`, `limitTimeout`, `noPrice` without extra sleep
+- **fix** `lib/skills/auctionSell.js` — `exitReason` on return; `getAuctionLowestPrice` retried up to 3× (5s apart); limit-wait timeout uses `limitTimeout` + `exitReason: 'limitTimeout'` instead of `bot._quitting = true`
+- **refactor** `lib/skills/nbtParse.js` — `parseMoneyString` / `formatMoney` single source
+- **refactor** `lib/skills/auctionSell.js` + `lib/skills/orderTraverse.js` — import money helpers from `nbtParse.js` (re-exports kept)
+- **refactor** `lib/skills/index.js` — export `parseMoneyString`, `formatMoney` from catalogue
+- **style** `lib/skills/collectMyOrder.js` — destructure formatting only
+- **docs** `profiles/redstone_auction.js` + `profiles/redstone_auction_2.js` — `scheduledRestartMs`, `restartIdleMs`, `payPlayerName`, `payIntervalMs`, flow comments; `redstone_auction_2` viewer port `3008` vs `redstone_auction` `3007`
+
 ## 2026-04-19 (1.20.4 → 1.21.1 version migration)
 - **arch** `profiles/_base.js` — migrated from pinned `version: '1.20.4'` to `version: '1.21.1'` (DonutSMP native); ViaVersion on DonutSMP translates to whatever the server's native protocol is with minimal overhead; `version: false` can be used to auto-detect (resolves to minecraft-protocol default, currently 1.21.11)
 - **docs** `lib/velocityPatch.js` — updated comment: confirmed `entityVelocityIsLpVec3=false` and `packet_entity_velocity = { velocity: vec3i16 }` (nested) is **unchanged** across 1.20.4, 1.21.1, 1.21.4, 1.21.11 in minecraft-data@3.109.0; patch is still required and is already defensive (no-op if `velocityX` already present)
@@ -8,10 +24,16 @@
 - **docs** `ARCHITECTURE.md` — updated §1 system map: DonutSMP version 1.21.1, ViaVersion note, `_base.js` version pin; updated §5 velocity bug to note schema is unchanged across 1.20.4–1.21.x with verified feature flags; updated bot.version reference to '1.21.1'
 - **docs** `.cursor/rules/mineflayer-bots.mdc` — updated velocityPatch section to note schema is unchanged across 1.20.4–1.21.x
 
+## 2026-04-21
+- **chore** `scripts/remove-log-snapshots.ps1` — deletes only `snapshots.jsonl` recursively under `mineflayer-bots/logs` (exact filename); `-WhatIf` dry-run; never targets `session.log` or other names
+- **fix** `scripts/remove-log-snapshots.ps1` — clears read-only before delete; try/catch + optional `-Retries` for transient locks; accurate ok/fail counts, first failure messages, exit code 2 on failures; tip to stop node when Access Denied
+
 ## 2026-04-19
 - **chore** `scripts/redstone-auction-day-summary.ps1` — PowerShell helper to sum per-day CHAT sale revenue (dust vs block) and connected/process time by bucket from `logs/redstone_auction/<date>/run_*/session.log`
 - **fix** `scripts/redstone-auction-day-summary.ps1` — default `-LogRoot` no longer uses `$PSScriptRoot` inside `param()` (it is empty during default binding when launched with `-File`); resolve `..\logs\redstone_auction` after param block with `$PSScriptRoot` / `Split-Path` fallback
 - **feat** `scripts/redstone-auction-day-summary.ps1` — scans all `logs/redstone_auction*` day folders in one pass; parses every unique `bought your <item> for` CHAT item into its own metrics (Hopper separate from redstone, etc.), proportional session-time split, idle bucket, per-root per-item breakdown, plus combined/grand totals (InvariantCulture money formatting)
+- **feat** `scripts/redstone-auction-day-summary.ps1` — three disjoint CHAT gain types: live `bought your` (no while-away), offline `bought your … while you were away`, and `You earned … from auction` (incl. offline variant); labels `Item (live)` vs `Item (offline sale)`; adds `You paid <player> $` totals by recipient and per log root
+- **feat** `scripts/redstone-auction-day-summary.ps1` — when `-LogRoot`/`-LogRoots` points at a parent without `<DateFolder>` at that level, auto-expands to immediate `redstone_auction*` subdirs (e.g. `logs/vm_logs/logs` → each profile log root + date)
 - **fix** `lib/skills/auctionSell.js` — three `lastTargetPrice` / price-anchor bugs: (1) anchor was set at batch-compute time even when the price floor stopped listing or the auction limit blocked every slot — nothing was ever actually listed at that price; fixed by moving `lastTargetPrice = targetPrice` to inside the confirm-success path only; (2) after a limit wait + sale, the bot continued listing remaining hotbar slots at the stale batch price even though the market may have moved during the wait (which can be minutes); fixed by setting `needsPriceRecheck = true; break` after `waitForNextSale` resolves and `continue`-ing the outer batch loop which re-fetches the AH lowest price before listing again — items still in hotbar are transparently re-found by `fillHotbarWith1x`; (3) price-floor stop left a below-floor value as the anchor, which would incorrectly suppress the undercut computation next time the same price appeared
 - **fix** `lib/skills/auctionSell.js` + `actions/auctionOrderLoop.js` — persist stats across sell phases: `totalEarned`, `buyCount`, `lastTargetPrice`, and `startTime` are now carried in a caller-owned `runStats` object created once in `auctionOrderLoop` and passed as `opts.persistedState` into every `auctionSellAll` call; previously all four were local variables that zeroed on each call, so the earnings counter reset after every collect→sell cycle and the anti self-undercut `lastTargetPrice` could not carry across phases; the "Done" summary and per-phase log now show cumulative session totals (sales count, total earned, $/min since session start) plus per-phase listed count
 
