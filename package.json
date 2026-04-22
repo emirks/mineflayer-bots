@@ -14,7 +14,8 @@
   "scripts": {
     "start": "node bot.js",
     "gui": "node gui/server.js",
-    "build": "pkg launch.js --targets node18-win-x64 --output dist/sentinel.exe --compress GZip && pkg launch.js --targets node18-linux-x64 --output dist/sentinel --compress GZip",
+    "build": "pkg launch.js --targets node18-win-x64 --output dist/sentinel.exe --compress GZip",
+    "linux": "pkg launch.js --targets node18-linux-x64 --output dist/sentinel --compress GZip",
     "postbuild": "node scripts/copy-dist-profiles.js && node scripts/zip-dist.js"
   },
   "pkg": {
@@ -30,7 +31,7 @@
       "node_modules/minecraft-data/data/**"
     ]
   },
-  "keywords": [],
+  "keywords": [ ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
