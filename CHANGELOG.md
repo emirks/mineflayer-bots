@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-04-25
+- **feat** `lib/skills/checkBalance.js` (new) — `checkBalance(bot, opts)`: sends `/bal`, listens for DonutSMP's `"You have $X."` chat reply, parses it with `parseMoneyString` from `nbtParse.js`, returns the balance as a number or `null` on timeout; exported from `lib/skills/index.js`
+- **refactor** `actions/auctionOrderLoop.js` — replaced delta-based `/pay` (which summed internal sale events) with a real wallet query: each `payIntervalMs` the bot calls `checkBalance`, and if `balance > payThreshold` it sends `Math.floor(balance − payThreshold)` to `payPlayerName`; added `payThreshold` option (default `30_000_000`); removed the now-unnecessary `lastPayEarned` accumulator; logs balance, threshold, and amount sent on every check
+- **docs** `lib/skills/index.js` — added `checkBalance.js` to catalogue comment and exports
+- **docs** `DEVELOPMENT.md` — marked `/bal`-based balance check item as complete
+- **docs** `profiles/redstone_auction.js`, `profiles/redstone_auction_2.js`, `profiles/redstone_auction_3.js` — documented `/bal` + `payThreshold` pay flow in header comments; set explicit `payThreshold: 30_000_000` and clarified `payIntervalMs` in `LOOP_OPTIONS`
+
 ## 2026-04-22
 - **feat** `profiles/_base.js` — `stateSnapshots: { enabled: false }` (spread into standard profiles) skips `snapshots.jsonl` and the 1 Hz `buildSnapshot` timer; set `enabled: true` to match old always-on behavior. Profiles that omit `stateSnapshots` still default to snapshots on (`createBotSession`: only explicit `enabled: false` disables)
 - **feat** `lib/createBotSession.js` — no snapshot writer / interval when `profile.stateSnapshots.enabled === false`
