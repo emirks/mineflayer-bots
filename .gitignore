@@ -4,6 +4,11 @@ auth-cache/
 logs/
 dist/
 
+# Bot dashboard SQLite DB and frontend build artifacts
+gui/bot-dashboard.db
+gui/client/dist/
+gui/client/node_modules/
+
 # Local scratch / one-off patch scripts (not part of the project)
 _patch_*
 *.bak
