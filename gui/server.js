@@ -1,236 +1,417 @@
 'use strict'
 
-// ─── GUI Server ────────────────────────────────────────────────────────────────
-// Express + Socket.io dashboard for managing multiple bot instances.
+// ── gui/server.js — Bot Dashboard HTTP + WebSocket server ────────────────────
+//
+// Entry point for the web dashboard. Runs the orchestrator in the same process.
 //
 // Usage:
-//   node gui/server.js
-//   GUI_PORT=3333 node gui/server.js
+//   node gui/server.js                     # dashboard only (start bots from UI)
+//   node gui/server.js redstone_auction    # dashboard + auto-start bot(s)
 //
-// The server imports the orchestrator (not the other way around), so all bot
-// lifecycle logic stays in orchestrator.js / BotManager.js unchanged.
+// `node orchestrator.js redstone_auction` still works unchanged.
+//
+// Environment:
+//   GUI_PORT=3030   — HTTP port (default 3030)
 
-const path = require('path')
-const fs   = require('fs')
-const http = require('http')
+const path   = require('path')
+const fs     = require('fs')
+const http   = require('http')
+const express = require('express')
+const { Server: SocketServer } = require('socket.io')
 
-const express  = require('express')
-const { Server: SocketIO } = require('socket.io')
-
+// Import orchestrator API (does NOT auto-start; just registers functions).
 const {
-  spawnInstance,
+  spawnBot,
   stopBot,
   getBotStates,
-  EventBus,
-  BotState,
 } = require('../orchestrator')
 
-const INSTANCES_FILE = path.join(__dirname, '..', 'instances.json')
-const PROFILES_DIR   = path.join(__dirname, '..', 'profiles')
-const PUBLIC_DIR     = path.join(__dirname, 'public')
-const GUI_PORT       = Number(process.env.GUI_PORT) || 3333
+const {
+  getDb,
+  getCumulativeGains,
+  getBucketedGains,
+  getGainEvents,
+  getTotalGains,
+  getTodayGains,
+  getBalanceSnaps,
+  getLatestBalance,
+  getSessionEvents,
+  getKnownProfiles,
+} = require('./db')
 
-// ── Persistence ───────────────────────────────────────────────────────────────
+const { setup: setupEventBridge } = require('./eventBridge')
 
-function loadInstances() {
-  try { return JSON.parse(fs.readFileSync(INSTANCES_FILE, 'utf8')) }
-  catch { return [] }
-}
+// ── Config ────────────────────────────────────────────────────────────────────
+const GUI_PORT = parseInt(process.env.GUI_PORT || '3030', 10)
 
-function saveInstances(instances) {
-  fs.writeFileSync(INSTANCES_FILE, JSON.stringify(instances, null, 2))
-}
+// Path resolution priority:
+//   GUI_LOGS_BASE env var (Docker) → pkg exe dir (Windows exe) → repo root (local dev)
+const _exeDir    = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..')
+const CLIENT_DIST  = path.join(__dirname, 'client', 'dist')   // embedded in snapshot / built locally
+const PROFILES_DIR = path.join(_exeDir, 'profiles')
+const LOGS_BASE    = process.env.GUI_LOGS_BASE ?? path.join(_exeDir, 'logs')
+
+// ── Track managers locally so we can access _currentBot ──────────────────────
+// BotManager instances returned by spawnBot() — needed for log tailing +
+// query-orders endpoint. Orchestrator's internal Map is separate but in sync.
+const managers = new Map()
 
 // ── Express + Socket.io ───────────────────────────────────────────────────────
-
 const app    = express()
 const server = http.createServer(app)
-const io     = new SocketIO(server)
+// Allow the Vercel-hosted frontend (and localhost dev) to connect.
+// Set GUI_ALLOWED_ORIGINS to a comma-separated list of origins, or '*' (default).
+const _allowedOrigins = (process.env.GUI_ALLOWED_ORIGINS ?? '*')
+  .split(',').map(s => s.trim()).filter(Boolean)
+const _corsOrigin = _allowedOrigins.length === 1 && _allowedOrigins[0] === '*'
+  ? '*'
+  : _allowedOrigins
 
-app.use(express.json())
-app.use(express.static(PUBLIC_DIR))
+const io     = new SocketServer(server, {
+  cors: { origin: _corsOrigin, methods: ['GET', 'POST'] },
+  path: '/socket.io',
+})
 
-// ── In-memory log ring buffer (last 200 entries forwarded to new connections) ─
+app.use((req, res, next) => {
+  const origin = req.headers.origin
+  if (_corsOrigin === '*') {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+  } else if (origin && _allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  if (req.method === 'OPTIONS') return res.sendStatus(204)
+  next()
+})
 
-const LOG_MAX = 200
-const logs    = []
+app.use(express.json({ limit: '1mb' }))
 
-function addLog(entry) {
-  const full = { ...entry, ts: Date.now() }
-  logs.push(full)
-  if (logs.length > LOG_MAX) logs.shift()
-  io.emit('log', full)
+// Serve built React SPA in production.
+if (fs.existsSync(CLIENT_DIST)) {
+  app.use(express.static(CLIENT_DIST))
 }
 
-function fmtUptime(ms) {
-  if (ms == null) return ''
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return ` (up ${s}s)`
-  const m = Math.floor(s / 60)
-  if (m < 60) return ` (up ${m}m ${s % 60}s)`
-  return ` (up ${Math.floor(m / 60)}h ${m % 60}m)`
-}
+// ── REST API ──────────────────────────────────────────────────────────────────
 
-// ── REST — profiles ───────────────────────────────────────────────────────────
+// GET /api/bots — all profiles merged with their current runtime state.
+// Profiles that are not running are included as state:'idle' so the UI can
+// show a Connect button for every profile without needing a separate call.
+app.get('/api/bots', async (_req, res) => {
+  try {
+    const activeStates = getBotStates()
+    const activeSet    = new Set(activeStates.map(s => s.profile))
 
+    let allProfileNames = []
+    try {
+      allProfileNames = fs.readdirSync(PROFILES_DIR)
+        .filter(f => f.endsWith('.js') && !f.startsWith('_'))
+        .map(f => path.basename(f, '.js'))
+        .sort()
+    } catch { /* profiles dir missing */ }
+
+    const enrich = async (s) => {
+      const today  = await getTodayGains(s.profile)
+      const latest = await getLatestBalance(s.profile)
+      return { ...s, todayEarned: today.total, todayCount: today.count, latestBalance: latest?.balance ?? null, latestBalanceTs: latest?.ts ?? null }
+    }
+
+    const enrichedActive = await Promise.all(activeStates.map(enrich))
+    const idleProfiles   = await Promise.all(
+      allProfileNames.filter(name => !activeSet.has(name)).map(name => enrich({ profile: name, state: 'idle' }))
+    )
+
+    res.json([...enrichedActive, ...idleProfiles])
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/bots/:name/start — spawn a bot
+app.post('/api/bots/:name/start', (req, res) => {
+  const { name } = req.params
+  try {
+    const manager = _spawnAndTrack(name)
+    res.json({ ok: true, state: manager.state })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+// POST /api/bots/:name/stop — stop a bot
+app.post('/api/bots/:name/stop', (_req, res) => {
+  try {
+    stopBot(_req.params.name)
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+// GET /api/profiles — list all available profile files
 app.get('/api/profiles', (_req, res) => {
-  const names = fs.readdirSync(PROFILES_DIR)
-    .filter(f => f.endsWith('.js') && !f.startsWith('_'))
-    .map(f => f.replace('.js', ''))
-  res.json(names)
+  try {
+    const files = fs.readdirSync(PROFILES_DIR)
+      .filter(f => f.endsWith('.js') && !f.startsWith('_'))
+      .sort()
+    const profiles = files.map(f => {
+      const name = path.basename(f, '.js')
+      const src  = fs.readFileSync(path.join(PROFILES_DIR, f), 'utf8')
+      return { name, desc: _extractProfileDesc(src) }
+    })
+    res.json(profiles)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
 })
 
-app.get('/api/profiles/:name/code', (req, res) => {
+// GET /api/profiles/:name — read raw profile source
+app.get('/api/profiles/:name', (req, res) => {
+  const filePath = path.join(PROFILES_DIR, `${req.params.name}.js`)
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Not found' })
+  res.type('text/plain').send(fs.readFileSync(filePath, 'utf8'))
+})
+
+// PUT /api/profiles/:name — write profile source (from config editor)
+app.put('/api/profiles/:name', (req, res) => {
+  const filePath = path.join(PROFILES_DIR, `${req.params.name}.js`)
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Not found' })
+  const { source } = req.body
+  if (typeof source !== 'string') return res.status(400).json({ error: 'source must be a string' })
+  try {
+    fs.writeFileSync(filePath, source, 'utf8')
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/bots/:name/gains — gains history for charts
+app.get('/api/bots/:name/gains', async (req, res) => {
   const { name } = req.params
-  if (/[^a-zA-Z0-9_-]/.test(name)) return res.status(400).json({ error: 'Invalid profile name' })
-  const file = path.join(PROFILES_DIR, `${name}.js`)
-  if (!fs.existsSync(file)) return res.status(404).json({ error: 'Not found' })
-  res.json({ code: fs.readFileSync(file, 'utf8') })
+  const now    = Date.now()
+  const from   = parseInt(req.query.from ?? now - 7 * 86_400_000, 10)
+  const to     = parseInt(req.query.to   ?? now, 10)
+  const bucket = req.query.bucket || 'raw'
+
+  try {
+    const cumulative = await getCumulativeGains(name, from, to)
+    const bucketed   = bucket === 'raw'
+      ? await getGainEvents(name, from, to)
+      : await getBucketedGains(name, from, to, bucket)
+    const totals    = await getTotalGains(name)
+    const todayData = await getTodayGains(name)
+    res.json({ cumulative, bucketed, totals, today: todayData })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
 })
 
-app.put('/api/profiles/:name/code', (req, res) => {
+// GET /api/bots/:name/balance — balance history for charts
+app.get('/api/bots/:name/balance', async (req, res) => {
   const { name } = req.params
-  if (/[^a-zA-Z0-9_-]/.test(name)) return res.status(400).json({ error: 'Invalid profile name' })
-  const file = path.join(PROFILES_DIR, `${name}.js`)
-  if (!fs.existsSync(file)) return res.status(404).json({ error: 'Profile not found' })
-  if (typeof req.body.code !== 'string') return res.status(400).json({ error: 'Missing code' })
+  const now  = Date.now()
+  const from = parseInt(req.query.from ?? now - 7 * 86_400_000, 10)
+  const to   = parseInt(req.query.to   ?? now, 10)
   try {
-    fs.writeFileSync(file, req.body.code)
-    // Clear require cache so next spawnInstance picks up the fresh profile
-    try { delete require.cache[require.resolve(`../profiles/${name}`)] } catch {}
-    addLog({ level: 'info', msg: `[PROFILE:${name}] Code saved — takes effect on next Connect` })
-    res.json({ ok: true })
+    const snaps  = await getBalanceSnaps(name, from, to)
+    const latest = await getLatestBalance(name)
+    res.json({ snaps, latest })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })
 
-// ── REST — instances ──────────────────────────────────────────────────────────
+// GET /api/bots/:name/logs — tail of current session.log
+app.get('/api/bots/:name/logs', (req, res) => {
+  const { name } = req.params
+  const lines = parseInt(req.query.lines || '300', 10)
 
-app.get('/api/instances', (_req, res) => {
-  const instances = loadInstances()
-  const stateMap  = Object.fromEntries(getBotStates().map(s => [s.profile, s]))
-  res.json(instances.map(inst => ({
-    ...inst,
-    ...(stateMap[inst.id] || { state: BotState.IDLE, attempt: 0, uptime: null }),
-  })))
-})
+  const logFile = _findLatestLogFile(name)
+  if (!logFile) return res.json([])
 
-app.post('/api/instances', (req, res) => {
-  const instances = loadInstances()
-  const inst = {
-    id:             `bot-${Date.now()}`,
-    label:          req.body.label          || 'New Bot',
-    profile:        req.body.profile        || 'sentinel',
-    username:       req.body.username       || '',
-    host:           req.body.host           || 'donutsmp.net',
-    port:           Number(req.body.port)   || 25565,
-    auth:           req.body.auth           || 'microsoft',
-    viewerEnabled:  req.body.viewerEnabled  ?? true,
-    viewerPort:     Number(req.body.viewerPort) || 3000,
-    reconnect:      req.body.reconnect      ?? false,
-  }
-  instances.push(inst)
-  saveInstances(instances)
-  io.emit('instanceCreated', inst)
-  res.json(inst)
-})
-
-app.put('/api/instances/:id', (req, res) => {
-  const instances = loadInstances()
-  const idx = instances.findIndex(i => i.id === req.params.id)
-  if (idx === -1) return res.status(404).json({ error: 'Not found' })
-  const updated = {
-    ...instances[idx],
-    label:         req.body.label         ?? instances[idx].label,
-    profile:       req.body.profile       ?? instances[idx].profile,
-    username:      req.body.username      ?? instances[idx].username,
-    host:          req.body.host          ?? instances[idx].host,
-    port:          req.body.port != null  ? Number(req.body.port)  : instances[idx].port,
-    auth:          req.body.auth          ?? instances[idx].auth,
-    viewerEnabled: req.body.viewerEnabled ?? instances[idx].viewerEnabled,
-    viewerPort:    req.body.viewerPort != null ? Number(req.body.viewerPort) : instances[idx].viewerPort,
-    reconnect:     req.body.reconnect     ?? instances[idx].reconnect,
-    id:            req.params.id,
-  }
-  instances[idx] = updated
-  saveInstances(instances)
-  io.emit('instanceUpdated', updated)
-  res.json(updated)
-})
-
-app.delete('/api/instances/:id', (req, res) => {
-  let instances = loadInstances()
-  const inst = instances.find(i => i.id === req.params.id)
-  if (!inst) return res.status(404).json({ error: 'Not found' })
-  try { stopBot(req.params.id) } catch {}
-  instances = instances.filter(i => i.id !== req.params.id)
-  saveInstances(instances)
-  io.emit('instanceRemoved', req.params.id)
-  res.json({ ok: true })
-})
-
-app.post('/api/instances/:id/start', (req, res) => {
-  const instances = loadInstances()
-  const inst = instances.find(i => i.id === req.params.id)
-  if (!inst) return res.status(404).json({ error: 'Not found' })
   try {
-    spawnInstance(inst)
-    res.json({ ok: true })
+    const content = fs.readFileSync(logFile, 'utf8')
+    const allLines = content.split('\n').filter(Boolean)
+    const recent = allLines.slice(-lines)
+    res.json(recent.map(_parseLogLine))
+  } catch {
+    res.json([])
+  }
+})
+
+// GET /api/bots/:name/session-events — state-change history
+app.get('/api/bots/:name/session-events', async (req, res) => {
+  const { name } = req.params
+  const now  = Date.now()
+  const from = parseInt(req.query.from ?? now - 7 * 86_400_000, 10)
+  const to   = parseInt(req.query.to   ?? now, 10)
+  try {
+    res.json(await getSessionEvents(name, from, to))
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })
 
-app.post('/api/instances/:id/stop', (req, res) => {
+// POST /api/bots/:name/query-orders — open /order GUI and read remaining orders
+app.post('/api/bots/:name/query-orders', async (req, res) => {
+  const { name } = req.params
+  const mgr = managers.get(name)
+  if (!mgr?._currentBot) return res.status(400).json({ error: 'Bot not connected' })
+
+  const bot = mgr._currentBot
+  if (bot._quitting) return res.status(400).json({ error: 'Bot is disconnecting' })
+
   try {
-    stopBot(req.params.id)
-    res.json({ ok: true })
+    const { queryOrders } = require('../lib/skills/queryOrders')
+    const orders = await queryOrders(bot, req.body || {})
+    res.json(orders)
   } catch (err) {
     res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/profiles-known — list all profiles that have ever been run (from DB)
+app.get('/api/profiles-known', async (_req, res) => {
+  try { res.json(await getKnownProfiles()) } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// SPA fallback — serve index.html for any unmatched path (Express 5 requires named wildcard)
+app.get('/{*path}', (_req, res) => {
+  const indexPath = path.join(CLIENT_DIST, 'index.html')
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath)
+  } else {
+    res.status(200).send(
+      '<h1 style="font-family:sans-serif;padding:2rem">Bot Dashboard</h1>' +
+      '<p>Frontend not built yet.</p>' +
+      '<pre>cd gui/client && pnpm install && pnpm build</pre>'
+    )
   }
 })
 
 // ── Socket.io ─────────────────────────────────────────────────────────────────
+io.on('connection', async (socket) => {
+  // Send full merged bot list (active + idle profiles) on connect.
+  const activeStates = getBotStates()
+  const activeSet    = new Set(activeStates.map(s => s.profile))
+  let allNames = []
+  try {
+    allNames = fs.readdirSync(PROFILES_DIR)
+      .filter(f => f.endsWith('.js') && !f.startsWith('_'))
+      .map(f => path.basename(f, '.js')).sort()
+  } catch { /* */ }
 
-io.on('connection', (socket) => {
-  const instances = loadInstances()
-  const states    = getBotStates()
-  socket.emit('init', { instances, states, logs: logs.slice(-50) })
-})
-
-// Forward all EventBus events to connected sockets + log buffer
-EventBus.on('bot:stateChange', (snap) => {
-  io.emit('stateChange', snap)
-  addLog({
-    level: snap.state === 'failed' ? 'error' : snap.state === 'reconnecting' ? 'warn' : 'info',
-    msg: `[${snap.profile}] → ${snap.state.toUpperCase()}${fmtUptime(snap.uptime)}`,
-  })
-})
-
-EventBus.on('bot:error', ({ profile, error }) => {
-  io.emit('botError', { id: profile, error: error?.message })
-  addLog({ level: 'error', msg: `[${profile}] Error: ${error?.message}` })
-})
-
-EventBus.on('bot:reconnecting', ({ profile, attempt, delay }) => {
-  io.emit('reconnecting', { id: profile, attempt, delay })
-  addLog({ level: 'warn', msg: `[${profile}] Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${attempt})` })
-})
-
-// ── Start ─────────────────────────────────────────────────────────────────────
-
-server.listen(GUI_PORT, () => {
-  console.log(`\n╔══════════════════════════════════════╗`)
-  console.log(`║  Bot Manager GUI                     ║`)
-  console.log(`║  http://localhost:${GUI_PORT}              ║`)
-  console.log(`╚══════════════════════════════════════╝\n`)
-})
-
-process.on('SIGINT', () => {
-  console.log('\n[GUI] Stopping all bots...')
-  for (const inst of loadInstances()) {
-    try { stopBot(inst.id) } catch {}
+  const enrich = async s => {
+    const today  = await getTodayGains(s.profile)
+    const latest = await getLatestBalance(s.profile)
+    return { ...s, todayEarned: today.total, todayCount: today.count, latestBalance: latest?.balance ?? null }
   }
-  setTimeout(() => process.exit(0), 1500)
+
+  const list = await Promise.all([
+    ...activeStates.map(enrich),
+    ...allNames.filter(n => !activeSet.has(n)).map(n => enrich({ profile: n, state: 'idle' })),
+  ])
+  socket.emit('bot:init', list)
 })
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function _spawnAndTrack(profileName) {
+  const manager = spawnBot({
+    profile    : profileName,
+    reconnect  : true,
+    maxRetries : Infinity,
+    baseDelayMs: 5000,
+  })
+  managers.set(profileName, manager)
+  return manager
+}
+
+function _extractProfileDesc(src) {
+  const lines = src.split('\n')
+  const out = []
+  let inBlock = false
+  for (const line of lines) {
+    const t = line.trim()
+    if (!inBlock && t.startsWith('// ─── Profile:')) { inBlock = true; continue }
+    if (inBlock) {
+      if (!t.startsWith('//')) break
+      const text = t.replace(/^\/\/\s?/, '').trim()
+      if (text) out.push(text)
+    }
+  }
+  return out.slice(0, 2).join('  ') || '(no description)'
+}
+
+/**
+ * Finds the most recent session.log for a profile.
+ * Scans logs/<profile>/<latest-date>/run_<latest-N>/session.log
+ */
+function _findLatestLogFile(profile) {
+  const profileDir = path.join(LOGS_BASE, profile)
+  if (!fs.existsSync(profileDir)) return null
+
+  const dates = fs.readdirSync(profileDir)
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort()
+  if (!dates.length) return null
+
+  const dateDir = path.join(profileDir, dates[dates.length - 1])
+  const runs = fs.readdirSync(dateDir)
+    .filter(d => /^run_\d+$/.test(d))
+    .sort((a, b) => parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]))
+  if (!runs.length) return null
+
+  const logFile = path.join(dateDir, runs[runs.length - 1], 'session.log')
+  return fs.existsSync(logFile) ? logFile : null
+}
+
+/**
+ * Parse one session.log line.
+ * Format: "2026-04-22 08:39:07.370 INFO  [profile] message"
+ */
+function _parseLogLine(line) {
+  const m = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)\s+(INFO |WARN |ERROR|DEBUG|PERF )\s+\[([^\]]+)\]\s+(.*)$/)
+  if (!m) return { ts: null, level: 'info', text: line, raw: line }
+  return {
+    ts   : new Date(m[1]).getTime(),
+    level: m[2].trim().toLowerCase(),
+    text : m[4],
+    raw  : line,
+  }
+}
+
+// ── Start server ──────────────────────────────────────────────────────────────
+function startServer() {
+  getDb() // initialize SQLite schema
+  setupEventBridge(io, managers)
+
+  server.listen(GUI_PORT, () => {
+    console.log(`\n[GUI] ══════════════════════════════════════════`)
+    console.log(`[GUI]  Dashboard → http://localhost:${GUI_PORT}`)
+    console.log(`[GUI] ══════════════════════════════════════════\n`)
+  })
+}
+
+// ── CLI ───────────────────────────────────────────────────────────────────────
+function runCLI() {
+  startServer()
+
+  const argvProfiles = process.argv.slice(2)
+  if (argvProfiles.length > 0) {
+    console.log(`[GUI] Auto-starting profiles: ${argvProfiles.join(', ')}`)
+    for (const name of argvProfiles) {
+      _spawnAndTrack(name)
+    }
+  }
+
+  process.on('SIGINT', () => {
+    console.log('\n[GUI] SIGINT — stopping all bots...')
+    for (const manager of managers.values()) manager.stop()
+    setTimeout(() => process.exit(0), 1500)
+  })
+}
+
+if (require.main === module) runCLI()
+
+module.exports = { app, io, server, managers, runCLI }
