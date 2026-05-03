@@ -34,13 +34,13 @@ const base = require('./_base')
 
 const LOOP_OPTIONS = {
     // ── Item ─────────────────────────────────────────────────────────────────
-    itemName: 'redstone_torch',
-    searchTerm: 'redstone torch',    // /ah <searchTerm> — match DonutSMP AH browse if needed
+    itemName: 'crafter',
+    searchTerm: 'crafter',    // /ah <searchTerm> — match DonutSMP AH browse if needed
     orderCommand: '/order',
 
     // ── Price ─────────────────────────────────────────────────────────────────
     decrementAmount: 10,                // $ to undercut the lowest listing by
-    minPriceFloor: 500,              // never list below this $ per torch (tune to market)
+    minPriceFloor: 3000,              // never list below this $ per torch (tune to market)
 
     // ── GUI timings ───────────────────────────────────────────────────────────
     winTimeoutMs: 8000,              // ms to wait for each GUI window to open
@@ -63,7 +63,7 @@ const LOOP_OPTIONS = {
     restartIdleMs: 300_000,              // idle 5 min before disconnecting (bot stays connected)
 
     // ── Periodic /pay ─────────────────────────────────────────────────────────
-    payPlayerName: 'Raikuuru',           // null to disable; sends /pay every payIntervalMs
+    payPlayerName: null,           // null to disable; sends /pay every payIntervalMs
     payIntervalMs: 600_000,              // 10 min between /pay commands
 
     // ── Debug ─────────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ module.exports = {
     ...base,
     bot: {
         ...base.bot,
-        username: 'serhat487-@hotmail.com',
+        username: 'qhhokrrl@sabesmail.com',
         profilesFolder: './auth-cache/redstone_auction',
     },
     viewer: { ...base.viewer, port: 3009 },
