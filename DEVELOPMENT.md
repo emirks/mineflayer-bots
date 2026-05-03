@@ -30,10 +30,12 @@ To-Do's and features to add:
   - [ ] Auto-withdraw Auctions?
 
 - [x] Send the money gained after a threshold to our main user with "/pay nickname 13M" ragularly.
-  - [ ] Get the money earned with /bal command, not sum up manually! Check the summing mechanism against that!
+  - [x] Get the money earned with /bal command, not sum up manually! Check the summing mechanism against that!
 - [x] Auto-Disconnect and Reconnect within an interval, wait some time for the market to stabilize? or handle this in the smart trading mechanism? Because now we disrupt it.
 
 - [ ] Integrate donut.auction or donut flip api! Reason on how to use that!
+
+- [ ] If no item is sold in like 3 mins, retreat all the items from the auction.
 
 
 
