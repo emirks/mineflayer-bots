@@ -1,0 +1,8 @@
+node_modules
+gui/client/node_modules
+dist/
+.git
+*.log
+crash.log
+bot-dashboard.db*
+auth-cache/

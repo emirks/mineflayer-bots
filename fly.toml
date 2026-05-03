@@ -1,0 +1,41 @@
+# fly.toml — Fly.io app configuration for mine-bots backend
+#
+# First-time setup:
+#   1. fly apps create mine-bots          (or pick your own name)
+#   2. fly volumes create bot_data --region ams --size 1
+#   3. fly secrets set GUI_ALLOWED_ORIGINS=https://your-vercel-app.vercel.app
+#   4. fly deploy
+#
+# Subsequent deploys: just `fly deploy`
+
+app            = "mine-bots"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  GUI_PORT      = "3030"
+  GUI_DB_PATH   = "/data/bot-dashboard.db"
+  NODE_ENV      = "production"
+
+[http_service]
+  internal_port       = 3030
+  force_https         = true
+  auto_stop_machines  = false   # bots must stay alive — never sleep
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type       = "connections"
+    hard_limit = 200
+    soft_limit = 150
+
+[[vm]]
+  memory   = "512mb"
+  cpu_kind = "shared"
+  cpus     = 1
+
+[[mounts]]
+  source      = "bot_data"
+  destination = "/data"
