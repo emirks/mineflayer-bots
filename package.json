@@ -5,6 +5,7 @@
   "main": "bot.js",
   "pnpm": {
     "onlyBuiltDependencies": [
+      "better-sqlite3",
       "canvas"
     ],
     "overrides": {
@@ -16,7 +17,9 @@
     "gui": "node gui/server.js",
     "build": "pkg launch.js --targets node18-win-x64 --output dist/sentinel.exe --compress GZip",
     "linux": "pkg launch.js --targets node18-linux-x64 --output dist/sentinel --compress GZip",
-    "postbuild": "node scripts/copy-dist-profiles.js && node scripts/zip-dist.js"
+    "postbuild": "node scripts/copy-dist-profiles.js && node scripts/zip-dist.js",
+    "build-gui": "node scripts/build-gui-client.js && pkg launch-gui.js --targets node20-win-x64 --output dist/bot-dashboard.exe --compress GZip && node scripts/copy-dist-profiles.js && node scripts/copy-native-bindings.js && node scripts/zip-gui-dist.js",
+    "build-gui-linux": "node scripts/build-gui-client.js && pkg launch-gui.js --targets node20-linux-x64 --output dist/bot-dashboard --compress GZip"
   },
   "pkg": {
     "scripts": [
@@ -25,24 +28,35 @@
       "triggers/**/*.js",
       "actions/**/*.js",
       "profiles/**/*.js",
-      "launch.js"
+      "launch.js",
+      "launch-gui.js",
+      "gui/db.js",
+      "gui/server.js",
+      "gui/eventBridge.js"
     ],
     "assets": [
-      "node_modules/minecraft-data/data/**"
+      "node_modules/minecraft-data/data/**",
+      "gui/client/dist/**"
     ]
   },
-  "keywords": [ ],
+  "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@kleppe/litematic-reader": "^1.0.11",
+    "better-sqlite3": "^12.9.0",
     "canvas": "^3.2.3",
     "express": "^5.1.0",
     "minecraft-data": "^3.109.0",
     "mineflayer": "^4.37.0",
     "mineflayer-collectblock": "^1.6.0",
     "mineflayer-pathfinder": "^2.4.5",
+    "mineflayer-schem": "^1.5.2",
+    "postgres": "^3.4.9",
     "prismarine-item": "^1.18.0",
+    "prismarine-nbt": "^2.8.0",
+    "prismarine-schematic": "^1.3.0",
     "prismarine-viewer": "^1.33.0",
     "socket.io": "^4.8.1",
     "vec3": "^0.2.0"
