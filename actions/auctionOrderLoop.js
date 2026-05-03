@@ -34,11 +34,13 @@
 //   scheduledRestartMs {number}   3_600_000        restart session after this uptime (1 h)
 //   restartIdleMs      {number}   300_000          idle before disconnect during restart (5 min)
 //   payPlayerName      {string}   null             /pay target username (null = feature off)
-//   payIntervalMs      {number}   600_000          interval between /pay commands (10 min)
+//   payThreshold       {number}   30_000_000       keep this many $ locally; send the rest
+//   payIntervalMs      {number}   600_000          interval between balance checks + /pay (10 min)
 //   debug              {boolean}  false            log window dumps + write JSON files
 
 const { auctionSellAll, formatMoney } = require('../lib/skills/auctionSell')
 const { collectFromMyOrder }          = require('../lib/skills/collectMyOrder')
+const { checkBalance }                = require('../lib/skills/checkBalance')
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const LOG = '[AUCTION-ORDER-LOOP]'
@@ -65,7 +67,8 @@ module.exports = async function auctionOrderLoop(bot, opts = {}) {
         scheduledRestartMs  = 3_600_000,   // 1 h
         restartIdleMs       = 300_000,     // 5 min idle before disconnect
         payPlayerName       = null,        // null = /pay feature disabled
-        payIntervalMs       = 600_000,     // 10 min
+        payThreshold        = 30_000_000, // keep this many $ locally; send the surplus
+        payIntervalMs       = 600_000,    // 10 min
         debug               = false,
     } = opts
 
@@ -90,8 +93,7 @@ module.exports = async function auctionOrderLoop(bot, opts = {}) {
     bot.on('_ahSale', onSale)
 
     // ── /pay tracking ─────────────────────────────────────────────────────────
-    let lastPayTime   = Date.now()
-    let lastPayEarned = 0   // runStats.totalEarned snapshot at last pay
+    let lastPayTime = Date.now()
 
     // ── Scheduled restart ─────────────────────────────────────────────────────
     const restartAt = Date.now() + scheduledRestartMs
@@ -126,18 +128,31 @@ module.exports = async function auctionOrderLoop(bot, opts = {}) {
         }
 
         // ── 0b. Periodic /pay ──────────────────────────────────────────────────
-        // Fires at the top of a cycle (no open windows) so the chat command lands
-        // cleanly.  Uses accumulated delta so a missed interval is never lost.
+        // Fires at the top of a cycle (no open windows) so /bal and /pay land
+        // cleanly without competing with GUI interactions.
+        // Reads the real wallet balance via /bal, then sends whatever exceeds
+        // payThreshold so the bot always keeps at least that amount locally.
         if (payPlayerName && Date.now() - lastPayTime >= payIntervalMs) {
-            const delta = Math.floor(runStats.totalEarned - lastPayEarned)
-            if (delta > 0) {
-                bot.log.info(`${LOG} /pay ${payPlayerName} ${delta}  (earned since last pay)`)
-                bot.chat(`/pay ${payPlayerName} ${delta}`)
-                lastPayEarned = runStats.totalEarned
-            } else {
-                bot.log.info(`${LOG} /pay skipped — $0 earned since last pay`)
-            }
             lastPayTime = Date.now()
+            const balance = await checkBalance(bot, { timeoutMs: 8000 })
+            if (balance === null) {
+                bot.log.warn(`${LOG} /pay skipped — /bal timed out, will retry next interval`)
+            } else if (balance > payThreshold) {
+                const toSend = Math.floor(balance - payThreshold)
+                bot.log.info(
+                    `${LOG} /pay ${payPlayerName} ${toSend}` +
+                    `  (balance: ${formatMoney(balance)}` +
+                    `  keep: ${formatMoney(payThreshold)}` +
+                    `  sending: ${formatMoney(toSend)})`
+                )
+                bot.chat(`/pay ${payPlayerName} ${toSend}`)
+                await sleep(1500)   // let the server process the payment
+            } else {
+                bot.log.info(
+                    `${LOG} /pay skipped — balance ${formatMoney(balance)}` +
+                    ` ≤ threshold ${formatMoney(payThreshold)}`
+                )
+            }
         }
 
         // ── 1. Decide: sell or collect ─────────────────────────────────────────
