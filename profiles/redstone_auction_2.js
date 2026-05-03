@@ -40,7 +40,7 @@ const LOOP_OPTIONS = {
 
     // ── Price ─────────────────────────────────────────────────────────────────
     decrementAmount: 10,                // $ to undercut the lowest listing by
-    minPriceFloor: 3000,             // never list below this $ per hopper
+    minPriceFloor: 2000,             // never list below this $ per hopper
 
     // ── GUI timings ───────────────────────────────────────────────────────────
     winTimeoutMs: 8000,              // ms to wait for each GUI window to open
@@ -60,10 +60,10 @@ const LOOP_OPTIONS = {
 
     // ── Scheduled restart ─────────────────────────────────────────────────────
     scheduledRestartMs: 3_600_000,       // restart session after 1 h of uptime
-    restartIdleMs: 300_000,              // idle 5 min before disconnecting (bot stays connected)
+    restartIdleMs: 180_000,              // idle 5 min before disconnecting (bot stays connected)
 
     // ── Periodic /pay ─────────────────────────────────────────────────────────
-    payPlayerName: 'Raikuuru',           // null to disable; sends /pay every payIntervalMs
+    payPlayerName: null,           // null to disable; sends /pay every payIntervalMs
     payIntervalMs: 600_000,              // 10 min between /pay commands
 
     // ── Debug ─────────────────────────────────────────────────────────────────
@@ -89,22 +89,6 @@ module.exports = {
             options: { delayMs: 5000 },
             actions: [
                 { type: 'auctionOrderLoop', options: LOOP_OPTIONS },
-            ],
-        },
-        {
-            // Safety: disconnect immediately if any non-whitelisted player comes close.
-            type: 'playerRadius',
-            options: {
-                printRadius: 30,
-                alertRadius: 10,
-                panicRadius: 5,
-                checkIntervalMs: 500,
-                panicIntervalMs: 100,
-                whitelist: ['Jynx_33', 'Raikuuru', 'Abundiho'],
-                blacklist: [],
-            },
-            actions: [
-                { type: 'disconnect' },
             ],
         },
     ],
