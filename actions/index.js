@@ -1,6 +1,7 @@
 // ─── Action registry ──────────────────────────────────────────────────────────
 // Add new action types here by mapping a name to its handler module.
 const registry = {
+  buildSchematic: require('./buildSchematic'),
   breakBlock: require('./breakBlock'),
   sentinelSweep: require('./sentinelSweep'),
   disconnect: require('./disconnect'),
